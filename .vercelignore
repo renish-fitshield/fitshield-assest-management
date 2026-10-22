@@ -1,0 +1,11 @@
+# Never upload local secrets or build output to Vercel.
+# Environment variables are configured in the Vercel project instead.
+.env
+.env.*
+!.env.example
+.next
+.next-*
+node_modules
+.vercel
+.claude
+*.log
