@@ -1,0 +1,121 @@
+import { ApiError, escapeRegex, isValidId } from '@/lib/api';
+import { enumValue } from '@/lib/listRequest';
+import {
+  ASSET_CATEGORIES,
+  ASSET_STATUSES,
+  ASSET_CONDITIONS,
+  PURCHASE_TYPES,
+  WARRANTY_STATUSES,
+} from '@/lib/constants';
+
+/** Keys accepted in `body.filter` (plus `searchText`) by the asset list and the dashboard. */
+export const ASSET_FILTER_KEYS = [
+  'assignedTo',
+  'category',
+  'status',
+  'condition',
+  'purchaseType',
+  'location',
+  'warrantyStatus',
+  'purchasedFrom',
+  'purchasedTo',
+];
+
+export const ASSET_SORT_FIELDS = [
+  'createdAt',
+  'updatedAt',
+  'assetId',
+  'itemName',
+  'category',
+  'status',
+  'condition',
+  'cost',
+  'purchaseDate',
+  'warrantyUntil',
+  'location',
+  'assignedAt',
+];
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function dateValue(filter, key) {
+  const value = filter[key];
+  if (!value) return null;
+  const d = new Date(value);
+  if (!DATE_RE.test(value) || Number.isNaN(d.getTime())) {
+    throw new ApiError(`Invalid filter.${key}: expected YYYY-MM-DD`, 400);
+  }
+  return d;
+}
+
+const startOfToday = () => {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
+
+/**
+ * Builds a Mongo filter from a parsed `body.filter` (see listRequest.parseFilter).
+ * Shared by the asset list and the dashboard so both filter identically.
+ * Invalid values throw ApiError(400).
+ */
+export function buildAssetFilter(filter) {
+  const query = {};
+
+  const enums = {
+    category: ASSET_CATEGORIES,
+    status: ASSET_STATUSES,
+    condition: ASSET_CONDITIONS,
+    purchaseType: PURCHASE_TYPES,
+  };
+  for (const [key, allowed] of Object.entries(enums)) {
+    const value = enumValue(filter, key, allowed);
+    if (value) query[key] = value;
+  }
+
+  if (filter.location) query.location = new RegExp(`^${escapeRegex(filter.location)}$`, 'i');
+
+  if (filter.assignedTo) {
+    if (!isValidId(filter.assignedTo)) throw new ApiError('Invalid filter.assignedTo: expected an employee id', 400);
+    query.assignedTo = filter.assignedTo;
+  }
+
+  const today = startOfToday();
+  switch (enumValue(filter, 'warrantyStatus', WARRANTY_STATUSES)) {
+    case 'Active':
+      query.warrantyUntil = { $gte: today };
+      break;
+    case 'Expired':
+      query.warrantyUntil = { $lt: today };
+      break;
+    case 'Not Applicable':
+      query.warrantyUntil = null; // matches null and missing
+      break;
+    default:
+  }
+
+  const from = dateValue(filter, 'purchasedFrom');
+  const to = dateValue(filter, 'purchasedTo');
+  if (from && to && from > to) throw new ApiError('filter.purchasedFrom must be on or before filter.purchasedTo', 400);
+  if (from || to) {
+    query.purchaseDate = {};
+    if (from) query.purchaseDate.$gte = from;
+    if (to) query.purchaseDate.$lte = to;
+  }
+
+  if (filter.searchText) {
+    const rx = new RegExp(escapeRegex(filter.searchText), 'i');
+    query.$or = [
+      { assetId: rx },
+      { itemName: rx },
+      { brand: rx },
+      { modelName: rx },
+      { serialNumber: rx },
+      { location: rx },
+      { vendorName: rx },
+      { invoiceNumber: rx },
+    ];
+  }
+
+  return query;
+}
