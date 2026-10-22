@@ -1,0 +1,561 @@
+/* FitShield brand tokens (mirrors fitshieldWebsite2.0) */
+:root {
+  --fs-green: #33a02c;
+  --fs-green-dark: #1e7a1b;
+  --fs-green-soft: #e8f6e6;
+  --fs-lime: #8ffc86;
+  --fs-ink: #141414;
+  --fs-ink-soft: #1d2939;
+  --fs-bg: #f7f9f7;
+  --fs-card: #ffffff;
+  --fs-muted: #6b7280;
+  --fs-muted-light: #9aa1ac;
+  --fs-line: #e5e7eb;
+  --fs-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 24px 60px -30px rgba(16, 24, 40, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--fs-bg);
+  color: var(--fs-ink);
+}
+
+::selection {
+  background: var(--fs-green-soft);
+}
+
+.muted {
+  color: var(--fs-muted);
+  font-size: 12px;
+}
+
+/* ---------- Logo ---------- */
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.logo svg {
+  flex: none;
+}
+
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  min-width: 0;
+}
+
+.wordmark {
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.logo-subtitle {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--fs-muted);
+}
+
+.logo-subtitle.dark {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fs-green-dark);
+}
+
+/* ---------- Login ---------- */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: radial-gradient(rgba(16, 24, 40, 0.05) 1px, transparent 1px) 0 0 / 22px 22px, var(--fs-bg);
+}
+
+.login-shell {
+  width: 100%;
+  max-width: 920px;
+  min-height: 540px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--fs-card);
+  border-radius: 2rem;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 40px 90px -30px rgba(16, 24, 40, 0.35);
+}
+
+.login-aside {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 40px;
+  color: #fff;
+  background: radial-gradient(circle at 85% 10%, rgba(51, 160, 44, 0.35), transparent 50%), var(--fs-ink);
+}
+
+.login-aside-title {
+  margin: 0 0 8px;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+}
+
+.login-aside-title em {
+  font-style: normal;
+  color: var(--fs-lime);
+}
+
+.login-aside-text {
+  margin: 0 0 32px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 15px;
+}
+
+.login-features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 20px;
+}
+
+.login-features li {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.login-features strong {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.login-features li span span {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 13px;
+}
+
+.login-feature-icon {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(143, 252, 134, 0.12);
+  color: var(--fs-lime);
+  font-size: 16px;
+}
+
+.login-aside-foot {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+}
+
+.login-main {
+  padding: 48px 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.login-mobile-brand {
+  display: none;
+  margin-bottom: 28px;
+}
+
+/* Stretch the 4 PIN boxes to the full field width.
+   antd's Input.OTP ignores className, so the class sits on the Form.Item instead. */
+.pin-field .ant-otp {
+  display: flex;
+  width: 100%;
+  column-gap: 12px;
+}
+
+.pin-field .ant-otp > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.pin-field .ant-otp input {
+  width: 100%;
+  height: 52px;
+  font-size: 22px;
+  text-align: center;
+}
+
+.pin-field .ant-otp-mask-icon {
+  font-size: 22px;
+}
+
+@media (max-width: 768px) {
+  .login-shell {
+    grid-template-columns: 1fr;
+    min-height: 0;
+    max-width: 440px;
+    border-radius: 1.25rem;
+  }
+
+  .login-aside {
+    display: none;
+  }
+
+  .login-main {
+    padding: 32px 24px;
+  }
+
+  .login-mobile-brand {
+    display: flex;
+  }
+}
+
+/* ---------- App shell ---------- */
+.sider-logo {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.ant-layout-sider-collapsed .sider-logo {
+  justify-content: center;
+  padding: 0;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.page-header h3.ant-typography {
+  letter-spacing: -0.02em;
+}
+
+.filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.filters .ant-input-search {
+  width: 280px;
+  max-width: 100%;
+}
+
+.filters .ant-select {
+  min-width: 160px;
+}
+
+.ant-card {
+  box-shadow: var(--fs-shadow-card);
+}
+
+/* ---------- Dashboard ---------- */
+.dash-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.dash-filters .search {
+  grid-column: span 2;
+}
+
+.dash-filters .range {
+  grid-column: span 2;
+}
+
+.dash-filters .ant-select,
+.dash-filters .ant-picker {
+  width: 100%;
+}
+
+.dash-filter-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* 6 KPI cards: 2×3 on small screens, 3×2 on laptops, one row of 6 on wide screens. */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+
+@media (min-width: 900px) {
+  .kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1680px) {
+  .kpi-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+.kpi {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.kpi-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  background: var(--fs-green-soft);
+  color: var(--fs-green-dark);
+}
+
+.kpi-label {
+  color: var(--fs-muted);
+  font-size: 13px;
+}
+
+.kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-hint {
+  color: var(--fs-muted-light);
+  font-size: 12px;
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.span-4 {
+  grid-column: span 4;
+}
+.span-5 {
+  grid-column: span 5;
+}
+.span-6 {
+  grid-column: span 6;
+}
+.span-7 {
+  grid-column: span 7;
+}
+.span-8 {
+  grid-column: span 8;
+}
+.span-12 {
+  grid-column: span 12;
+}
+
+@media (max-width: 1100px) {
+  .span-4,
+  .span-5,
+  .span-6,
+  .span-7,
+  .span-8 {
+    grid-column: span 12;
+  }
+}
+
+@media (max-width: 640px) {
+  .dash-filters .search,
+  .dash-filters .range {
+    grid-column: span 1;
+  }
+}
+
+.section-title {
+  margin: 8px 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Horizontal bar list */
+.bar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.bar-row {
+  padding: 6px 8px;
+  border-radius: 10px;
+  outline: none;
+}
+
+.bar-row.clickable {
+  cursor: pointer;
+}
+
+.bar-row.clickable:hover,
+.bar-row.clickable:focus-visible {
+  background: var(--fs-bg);
+}
+
+.bar-row.active {
+  background: var(--fs-green-soft);
+}
+
+.bar-row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.bar-label {
+  color: var(--fs-ink);
+}
+
+.bar-value {
+  color: var(--fs-ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-track {
+  height: 8px;
+  border-radius: 4px;
+  background: #f0f2f0;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+/* Monthly column chart */
+.month-chart {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  height: 230px;
+}
+
+/* Axis labels and gridlines live in layers inset by the 22px label gutter, so % = plot height. */
+.month-axis {
+  position: relative;
+  min-width: 44px;
+  margin-bottom: 22px;
+  font-size: 11px;
+  color: var(--fs-muted-light);
+  font-variant-numeric: tabular-nums;
+}
+
+.month-axis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  white-space: nowrap;
+}
+
+.month-plot {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 2px;
+  padding-bottom: 22px;
+}
+
+.month-grid-layer {
+  position: absolute;
+  inset: 0 0 22px 0;
+  pointer-events: none;
+}
+
+.month-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed #e9ece9;
+}
+
+.month-empty {
+  position: absolute;
+  inset: 0 0 22px 0;
+  display: grid;
+  place-items: center;
+  color: var(--fs-muted);
+  font-size: 13px;
+}
+
+.month-col {
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  cursor: default;
+}
+
+.month-col:hover {
+  background: rgba(51, 160, 44, 0.06);
+  border-radius: 6px 6px 0 0;
+}
+
+.month-bar {
+  width: min(60%, 28px);
+  border-radius: 4px 4px 0 0;
+  transition: height 0.3s ease;
+}
+
+.month-label {
+  position: absolute;
+  bottom: -20px;
+  font-size: 11px;
+  color: var(--fs-muted);
+}
+
+.mini-table .ant-table-cell {
+  white-space: nowrap;
+}
