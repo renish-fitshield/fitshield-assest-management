@@ -1,12 +1,18 @@
 node_modules/
 .next/
 .next-*/
-.vercel
 out/
 build/
-.env*.local
-.env
 npm-debug.log*
 .DS_Store
 *.tsbuildinfo
 next-env.d.ts
+
+# Local secrets (the template stays tracked)
+.env
+.env*.local
+.env.*
+!.env.example
+
+# Vercel CLI project link
+.vercel
