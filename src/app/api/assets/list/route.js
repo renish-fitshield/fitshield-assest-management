@@ -24,7 +24,6 @@ export async function POST(req) {
         .sort(request.mongoSort)
         .skip(skip)
         .limit(limit)
-        .populate('purchasedBy', 'employeeId fullName')
         .populate('assignedTo', HOLDER_FIELDS)
     );
 

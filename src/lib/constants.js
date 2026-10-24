@@ -59,6 +59,17 @@ export const RETURN_STATUSES = ['Available', 'Under Repair'];
 export const ASSET_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export const ASSET_IMAGE_MAX_MB = 2;
 
+// Bill / invoice / cheque file attached to an asset.
+export const ASSET_BILL_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+export const ASSET_BILL_MAX_MB = 10;
+// Large files are uploaded in pieces of this size: Vercel rejects request bodies over 4.5 MB.
+export const UPLOAD_CHUNK_BYTES = 2 * 1024 * 1024;
+
+export const MAX_ASSET_QUANTITY = 100_000;
+
+// Only single items can be assigned to an employee; an entry with quantity > 1 can't be.
+export const isSingleUnit = (asset) => (asset?.quantity ?? 1) <= 1;
+
 export const DEPARTMENTS = [
   'Engineering',
   'Product',

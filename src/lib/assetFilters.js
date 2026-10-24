@@ -19,6 +19,7 @@ export const ASSET_FILTER_KEYS = [
   'warrantyStatus',
   'purchasedFrom',
   'purchasedTo',
+  'assignable', // "true" → only assets that can be assigned now (Available, unassigned, quantity 1)
 ];
 
 export const ASSET_SORT_FIELDS = [
@@ -26,6 +27,7 @@ export const ASSET_SORT_FIELDS = [
   'updatedAt',
   'assetId',
   'itemName',
+  'quantity',
   'category',
   'status',
   'condition',
@@ -71,6 +73,13 @@ export function buildAssetFilter(filter) {
   for (const [key, allowed] of Object.entries(enums)) {
     const value = enumValue(filter, key, allowed);
     if (value) query[key] = value;
+  }
+
+  if (filter.assignable) {
+    if (filter.assignable !== 'true') throw new ApiError('Invalid filter.assignable: expected "true"', 400);
+    query.status = 'Available';
+    query.assignedTo = null;
+    query.quantity = { $not: { $gt: 1 } }; // quantity 1 (or missing on old records)
   }
 
   if (filter.location) query.location = new RegExp(`^${escapeRegex(filter.location)}$`, 'i');

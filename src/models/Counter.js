@@ -11,14 +11,19 @@ const counterSchema = new mongoose.Schema(
 
 const Counter = defineModel('Counter', counterSchema, 'am_counters');
 
-/** Atomically generates the next human-readable ID, e.g. AST-0001. */
-export async function nextSequenceId(name, prefix) {
+/** Atomically returns the next number (1, 2, 3…) for the named sequence. */
+export async function nextSequence(name) {
   const counter = await Counter.findByIdAndUpdate(
     name,
     { $inc: { seq: 1 } },
     { new: true, upsert: true }
   );
-  return `${prefix}-${String(counter.seq).padStart(4, '0')}`;
+  return counter.seq;
+}
+
+/** Atomically generates the next human-readable ID, e.g. EMP-0001. */
+export async function nextSequenceId(name, prefix) {
+  return `${prefix}-${String(await nextSequence(name)).padStart(4, '0')}`;
 }
 
 export default Counter;

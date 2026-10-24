@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { App, AutoComplete, Col, DatePicker, Form, Input, Modal, Row, Select, Spin } from 'antd';
 import { DEPARTMENTS, WORK_TYPES, EMPLOYEE_STATUSES, LOCATIONS } from '@/lib/constants';
@@ -90,6 +90,13 @@ export default function EmployeeFormModal({ open, employeeId, onClose, onSaved }
   }, [saving, onClose]);
 
   const waitingForRecord = isEdit && (record.loading || (!record.employee && !record.error));
+  const showForm = open && !record.error && !waitingForRecord;
+
+  // The form instance outlives each open, and a remounted <Form> merges its initialValues *under* the
+  // values it still holds — so reset once it's showing, or the previously edited employee's data leaks in.
+  useLayoutEffect(() => {
+    if (showForm) form.resetFields();
+  }, [showForm, initialValues, form]);
 
   let body;
   if (record.error) {

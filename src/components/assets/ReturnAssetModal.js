@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useLayoutEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import dayjs from 'dayjs';
 import { App, DatePicker, Descriptions, Form, Input, Modal, Radio, Select } from 'antd';
@@ -25,6 +25,11 @@ export default function ReturnAssetModal({ open, asset, onClose, onDone }) {
     () => ({ returnedAt: dayjs(), condition: asset?.condition, statusAfter: 'Available' }),
     [asset]
   );
+
+  // Reset on open so the previous asset's condition doesn't carry over (the form instance outlives each open).
+  useLayoutEffect(() => {
+    if (open) form.resetFields();
+  }, [open, initialValues, form]);
 
   const disabledDate = useCallback(
     (d) =>

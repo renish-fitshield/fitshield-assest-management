@@ -1,11 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   App,
   AutoComplete,
-  Button,
   Col,
   DatePicker,
   Divider,
@@ -25,6 +24,7 @@ import {
   ASSET_STATUSES,
   MANUAL_ASSET_STATUSES,
   LOCATIONS,
+  MAX_ASSET_QUANTITY,
   getWarrantyStatus,
 } from '@/lib/constants';
 import { toDayjs } from '@/lib/format';
@@ -32,23 +32,27 @@ import { applyServerErrors, disableFutureDates, maxLen, requiredText, trimStart,
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
 import AssetImageField from '@/components/assets/AssetImageField';
+import AssetBillField from '@/components/assets/AssetBillField';
+import { getErrorMessage } from '@/services/axios';
+import { uploadInChunks } from '@/services/uploads';
 import {
   createAsset,
   deleteAssetImage,
   fetchAssetById,
+  fetchBrandOptions,
   updateAsset,
   uploadAssetImage,
 } from '@/store/assetsSlice';
-import { fetchEmployeeOptions } from '@/store/employeesSlice';
 
 const toOptions = (list) => list.map((v) => ({ label: v, value: v }));
 const CATEGORY_OPTIONS = toOptions(ASSET_CATEGORIES);
-const BRAND_OPTIONS = toOptions(BRANDS);
+const DEFAULT_BRAND_OPTIONS = toOptions(BRANDS);
 const CONDITION_OPTIONS = toOptions(ASSET_CONDITIONS);
 // "Assigned" is only set by the Assign action; an assigned asset's status is locked until returned.
 const STATUS_OPTIONS = toOptions(MANUAL_ASSET_STATUSES);
 const ALL_STATUS_OPTIONS = toOptions(ASSET_STATUSES);
 const NO_IMAGE_CHANGE = { file: null, remove: false };
+const NO_BILL_CHANGE = { file: null, remove: false };
 const PURCHASE_TYPE_OPTIONS = toOptions(PURCHASE_TYPES);
 const LOCATION_OPTIONS = toOptions(LOCATIONS);
 const filterAutoComplete = (input, option) => option.value.toLowerCase().includes(input.toLowerCase());
@@ -56,11 +60,11 @@ const formatCost = (v) => (v || v === 0 ? `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g
 const parseCost = (v) => v?.replace(/[^\d.]/g, '');
 
 const DATE_FIELDS = ['purchaseDate', 'warrantyUntil'];
-const NEW_ASSET_DEFAULTS = { condition: 'New', status: 'Available' };
+const NEW_ASSET_DEFAULTS = { quantity: 1, condition: 'New', status: 'Available' };
 
 function toFormValues(asset) {
   if (!asset) return NEW_ASSET_DEFAULTS;
-  const values = { ...asset, purchasedBy: asset.purchasedBy?._id ?? null };
+  const values = { ...asset };
   DATE_FIELDS.forEach((f) => (values[f] = toDayjs(asset[f])));
   return values;
 }
@@ -88,7 +92,6 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
   const dispatch = useDispatch();
   const { message } = App.useApp();
   const saving = useSelector((s) => s.assets.saving);
-  const { options: employees, optionsLoading, optionsError } = useSelector((s) => s.employees);
   const warrantyUntil = Form.useWatch('warrantyUntil', form);
   const isEdit = Boolean(assetId);
 
@@ -96,11 +99,14 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
   const [reloadKey, setReloadKey] = useState(0);
   const [imageChange, setImageChange] = useState(NO_IMAGE_CHANGE);
   const [savingImage, setSavingImage] = useState(false);
-  const busy = saving || savingImage;
+  const [billChange, setBillChange] = useState(NO_BILL_CHANGE);
+  const [billProgress, setBillProgress] = useState(null); // 0–100 while the bill uploads
+  const busy = saving || savingImage || billProgress !== null;
 
-  // Forget any picked image whenever the modal opens for a different asset (or closes).
+  // Forget any picked image / bill whenever the modal opens for a different asset (or closes).
   useEffect(() => {
     setImageChange(NO_IMAGE_CHANGE);
+    setBillChange(NO_BILL_CHANGE);
   }, [open, assetId]);
 
   // Load the record to edit (aborted if the modal closes first).
@@ -123,22 +129,18 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
     return () => promise.abort();
   }, [open, assetId, reloadKey, dispatch]);
 
-  const loadEmployees = useCallback(() => dispatch(fetchEmployeeOptions()), [dispatch]);
-
+  // Brand suggestions include brands other users have added; until they load (or if that fails)
+  // the built-in list is used, and any brand can still be typed.
+  const [brandOptions, setBrandOptions] = useState(DEFAULT_BRAND_OPTIONS);
   useEffect(() => {
     if (!open) return undefined;
-    const promise = loadEmployees();
+    const promise = dispatch(fetchBrandOptions());
+    promise
+      .unwrap()
+      .then(({ items }) => setBrandOptions(toOptions(items)))
+      .catch(() => {});
     return () => promise.abort();
-  }, [open, loadEmployees]);
-
-  const employeeOptions = useMemo(
-    () =>
-      employees.map((e) => ({
-        value: e._id,
-        label: `${e.fullName} (${e.employeeId})${e.status === 'Exited' ? ' · Exited' : ''}`,
-      })),
-    [employees]
-  );
+  }, [open, dispatch]);
 
   const initialValues = useMemo(() => toFormValues(record.asset), [record.asset]);
   const warrantyStatus = useMemo(() => getWarrantyStatus(warrantyUntil?.toDate?.()), [warrantyUntil]);
@@ -146,9 +148,25 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
   const handleSubmit = useCallback(async () => {
     const values = await validateOrScroll(form);
     if (!values) return;
+    const payload = toPayload(values);
+
+    // The bill goes up first (in pieces), then the create/update request attaches it by uploadId.
+    if (billChange.file) {
+      setBillProgress(0);
+      try {
+        payload.billUploadId = await uploadInChunks(billChange.file, { onProgress: setBillProgress });
+      } catch (err) {
+        message.error(`The bill couldn't be uploaded: ${getErrorMessage(err)}`);
+        return;
+      } finally {
+        setBillProgress(null);
+      }
+    } else if (billChange.remove && record.asset?.bill) {
+      payload.removeBill = true;
+    }
+
     let result;
     try {
-      const payload = toPayload(values);
       result = await dispatch(isEdit ? updateAsset({ id: assetId, data: payload }) : createAsset(payload)).unwrap();
     } catch (err) {
       const inline = applyServerErrors(form, err);
@@ -174,7 +192,7 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
     if (imageError) message.warning(`${result.message || 'Asset saved'}, but the image wasn't saved: ${imageError}`);
     else message.success(result.message || (isEdit ? 'Asset updated' : 'Asset created'));
     onSaved?.(result.item);
-  }, [form, dispatch, isEdit, assetId, message, onSaved, imageChange, record.asset]);
+  }, [form, dispatch, isEdit, assetId, message, onSaved, imageChange, billChange, record.asset]);
 
   const handleCancel = useCallback(() => {
     if (!busy) onClose?.();
@@ -183,6 +201,13 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
   const assignedHolder = record.asset?.assignedTo;
 
   const waitingForRecord = isEdit && (record.loading || (!record.asset && !record.error));
+  const showForm = open && !record.error && !waitingForRecord;
+
+  // The form instance outlives each open, and a remounted <Form> merges its initialValues *under* the
+  // values it still holds — so reset once it's showing, or the previously edited asset's data leaks in.
+  useLayoutEffect(() => {
+    if (showForm) form.resetFields();
+  }, [showForm, initialValues, form]);
 
   let body;
   if (record.error) {
@@ -230,7 +255,7 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
               <Select options={CATEGORY_OPTIONS} placeholder="Select category" showSearch />
             </Form.Item>
           </Col>
-          <Col xs={24} md={16}>
+          <Col xs={24} md={12}>
             <Form.Item
               label="Item Name"
               name="itemName"
@@ -240,9 +265,45 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
               <Input placeholder="e.g. MacBook Pro 14" maxLength={150} />
             </Form.Item>
           </Col>
+          <Col xs={24} md={4}>
+            <Form.Item
+              label="Quantity"
+              name="quantity"
+              tooltip={
+                assignedHolder
+                  ? `Assigned to ${assignedHolder.fullName} — return it to change the quantity`
+                  : 'Only assets with quantity 1 can be assigned to an employee'
+              }
+              rules={[
+                { required: true, message: 'Quantity is required' },
+                { type: 'integer', min: 1, message: 'Must be a whole number, 1 or more' },
+                { type: 'integer', max: MAX_ASSET_QUANTITY, message: 'Quantity is too large' },
+              ]}
+            >
+              <InputNumber
+                style={{ width: '100%' }}
+                min={1}
+                max={MAX_ASSET_QUANTITY}
+                precision={0}
+                disabled={Boolean(assignedHolder)}
+              />
+            </Form.Item>
+          </Col>
           <Col xs={24} md={8}>
-            <Form.Item label="Brand" name="brand">
-              <Select options={BRAND_OPTIONS} placeholder="Select brand" showSearch allowClear />
+            <Form.Item
+              label="Brand"
+              name="brand"
+              normalize={trimStart}
+              rules={[maxLen(60)]}
+              tooltip="Not in the list? Type the brand name — it will be added to the list for everyone"
+            >
+              <AutoComplete
+                options={brandOptions}
+                filterOption={filterAutoComplete}
+                placeholder="Select or type brand"
+                allowClear
+                maxLength={60}
+              />
             </Form.Item>
           </Col>
           <Col xs={24} md={8}>
@@ -377,29 +438,18 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
             </Form.Item>
           </Col>
           <Col xs={24} md={8}>
-            <Form.Item
-              label="Purchased By"
-              name="purchasedBy"
-              validateStatus={optionsError ? 'warning' : undefined}
-              help={
-                optionsError ? (
-                  <span>
-                    Couldn&apos;t load employees.{' '}
-                    <Button type="link" size="small" style={{ padding: 0 }} onClick={loadEmployees}>
-                      Retry
-                    </Button>
-                  </span>
-                ) : undefined
-              }
-            >
-              <Select
-                placeholder={optionsLoading ? 'Loading employees…' : 'Select employee'}
-                loading={optionsLoading}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                options={employeeOptions}
-                notFoundContent={optionsLoading ? <Spin size="small" /> : 'No employees found'}
+            <Form.Item label="Purchased By" name="purchasedBy" normalize={trimStart} rules={[maxLen(120)]}>
+              <Input placeholder="Name of the person who purchased it" maxLength={120} />
+            </Form.Item>
+          </Col>
+          <Col span={24}>
+            <Form.Item label="Bill / Invoice (optional)">
+              <AssetBillField
+                assetId={assetId}
+                currentBill={record.asset?.bill}
+                value={billChange}
+                onChange={setBillChange}
+                disabled={busy}
               />
             </Form.Item>
           </Col>
@@ -419,7 +469,7 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
     <Modal
       open={open}
       title={title}
-      okText={isEdit ? 'Update' : 'Add Asset'}
+      okText={billProgress !== null ? `Uploading bill… ${billProgress}%` : isEdit ? 'Update' : 'Add Asset'}
       onOk={handleSubmit}
       onCancel={handleCancel}
       confirmLoading={busy}

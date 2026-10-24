@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
-import { Button, Descriptions, Divider, Drawer, Empty, Skeleton, Space, Tag, Timeline, Typography } from 'antd';
+import { Button, Descriptions, Divider, Drawer, Empty, Skeleton, Space, Tag, Timeline, Tooltip, Typography } from 'antd';
 import { RollbackOutlined, UserAddOutlined } from '@ant-design/icons';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
 import AssetImage from '@/components/assets/AssetImage';
+import AssetBillLink from '@/components/assets/AssetBillLink';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format';
+import { isSingleUnit } from '@/lib/constants';
 import { fetchAssetAssignments } from '@/store/assetsSlice';
 
 function HistoryItem({ entry }) {
@@ -65,6 +67,7 @@ export default function AssetDetailsDrawer({ asset, onClose, onAssign, onReturn 
         ? [
             ['Asset ID', asset.assetId],
             ['Category', asset.category],
+            ['Quantity', asset.quantity ?? 1],
             ['Brand', asset.brand],
             ['Model Name', asset.modelName],
             ['Serial Number', asset.serialNumber],
@@ -80,7 +83,8 @@ export default function AssetDetailsDrawer({ asset, onClose, onAssign, onReturn 
             ['Warranty Status', <StatusTag key="w" value={asset.warrantyStatus} />],
             ['Purchase City', asset.purchaseCity],
             ['Purchase Type', asset.purchaseType],
-            ['Purchased By', asset.purchasedBy ? `${asset.purchasedBy.fullName} (${asset.purchasedBy.employeeId})` : null],
+            ['Purchased By', asset.purchasedBy],
+            ['Bill / Invoice', asset.bill ? <AssetBillLink key="b" assetId={asset._id} bill={asset.bill} /> : null],
             ['Remarks', asset.remarks],
             ['Created At', formatDateTime(asset.createdAt)],
             ['Updated At', formatDateTime(asset.updatedAt)],
@@ -118,15 +122,24 @@ export default function AssetDetailsDrawer({ asset, onClose, onAssign, onReturn 
                 <>
                   <div className="muted">Not assigned</div>
                   {asset.status === 'Available' && (
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<UserAddOutlined />}
-                      style={{ marginTop: 8 }}
-                      onClick={() => onAssign?.(asset)}
+                    <Tooltip
+                      title={
+                        isSingleUnit(asset)
+                          ? null
+                          : `Quantity limitation: this asset has a quantity of ${asset.quantity}, so you can't assign it. Only assets with quantity 1 can be assigned.`
+                      }
                     >
-                      Assign to employee
-                    </Button>
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<UserAddOutlined />}
+                        style={{ marginTop: 8 }}
+                        disabled={!isSingleUnit(asset)}
+                        onClick={() => onAssign?.(asset)}
+                      >
+                        Assign to employee
+                      </Button>
+                    </Tooltip>
                   )}
                 </>
               )}

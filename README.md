@@ -23,7 +23,7 @@ Everything lives in a dedicated database (`MONGODB_DB`, default `fitshield_asset
 | Collection     | Purpose                                          |
 | -------------- | ------------------------------------------------ |
 | `am_users`     | Login users (email, bcrypt-hashed PIN, role)     |
-| `am_assets`    | Assets (`assetId` auto-generated `AST-0001`)     |
+| `am_assets`    | Assets (`assetId` auto-generated `FITSHIELD-DELL-26-001`) |
 | `am_employees` | Employees (`employeeId` auto-generated `EMP-0001`) |
 | `am_counters`  | Sequences for the human-readable IDs             |
 

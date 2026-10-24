@@ -1,10 +1,10 @@
 import mongoose from 'mongoose';
 import {
   ASSET_CATEGORIES,
-  BRANDS,
   ASSET_CONDITIONS,
   PURCHASE_TYPES,
   ASSET_STATUSES,
+  MAX_ASSET_QUANTITY,
   getWarrantyStatus,
 } from '@/lib/constants';
 import '@/models/Employee';
@@ -13,6 +13,7 @@ import defineModel from './defineModel';
 export const ASSET_FIELDS = [
   'category',
   'itemName',
+  'quantity',
   'brand',
   'modelName',
   'serialNumber',
@@ -41,12 +42,33 @@ const imageSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Bill / invoice / cheque in GridFS (bucket am_asset_bills); set via `billUploadId` on create/update.
+const billSchema = new mongoose.Schema(
+  {
+    fileId: { type: mongoose.Schema.Types.ObjectId, required: true },
+    filename: { type: String, required: true },
+    contentType: { type: String, required: true },
+    size: { type: Number, required: true },
+    uploadedAt: { type: Date, required: true },
+  },
+  { _id: false }
+);
+
 const assetSchema = new mongoose.Schema(
   {
     assetId: { type: String, required: true, unique: true, immutable: true },
     category: { type: String, enum: ASSET_CATEGORIES, required: [true, 'Category is required'] },
     itemName: { type: String, required: [true, 'Item name is required'], trim: true, maxlength: 150 },
-    brand: { type: String, enum: BRANDS },
+    quantity: {
+      type: Number,
+      required: [true, 'Quantity is required'],
+      default: 1,
+      min: [1, 'Quantity must be at least 1'],
+      max: [MAX_ASSET_QUANTITY, 'Quantity is too large'],
+      validate: { validator: Number.isInteger, message: 'Quantity must be a whole number' },
+    },
+    // Free text; new brands are saved to am_brands (see models/Brand.js) so they show up for everyone.
+    brand: { type: String, trim: true, maxlength: 60 },
     modelName: { type: String, trim: true, maxlength: 150 },
     serialNumber: { type: String, trim: true, maxlength: 100 },
     specifications: { type: String, trim: true, maxlength: 2000 },
@@ -68,7 +90,7 @@ const assetSchema = new mongoose.Schema(
     warrantyUntil: { type: Date },
     purchaseCity: { type: String, trim: true, maxlength: 120 },
     purchaseType: { type: String, enum: PURCHASE_TYPES },
-    purchasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
+    purchasedBy: { type: String, trim: true, maxlength: 120 },
     status: { type: String, enum: ASSET_STATUSES, default: 'Available' },
     remarks: { type: String, trim: true, maxlength: 2000 },
 
@@ -79,6 +101,7 @@ const assetSchema = new mongoose.Schema(
 
     // Photo stored in GridFS (bucket am_asset_images); managed by the image APIs.
     image: { type: imageSchema, default: null },
+    bill: { type: billSchema, default: null },
   },
   {
     timestamps: true,

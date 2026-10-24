@@ -57,9 +57,6 @@ export async function DELETE(_req, { params }) {
     const employee = await Employee.findByIdAndDelete(id);
     if (!employee) return fail('Employee not found', 404);
 
-    // Don't leave assets pointing at a deleted employee.
-    await Asset.updateMany({ purchasedBy: id }, { $set: { purchasedBy: null } });
-
     return ok({ id, message: 'Employee deleted' });
   } catch (err) {
     return handleError(err);

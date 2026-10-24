@@ -8,17 +8,20 @@ import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  FileImageOutlined,
+  FilePdfOutlined,
   PlusOutlined,
   RollbackOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
-import { ASSET_CATEGORIES, ASSET_STATUSES, ASSET_CONDITIONS, WARRANTY_STATUSES } from '@/lib/constants';
+import { ASSET_CATEGORIES, ASSET_STATUSES, ASSET_CONDITIONS, WARRANTY_STATUSES, isSingleUnit } from '@/lib/constants';
 import { formatCurrency, formatDate } from '@/lib/format';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
 import AssetImage from '@/components/assets/AssetImage';
 import AssetFormModal from '@/components/assets/AssetFormModal';
 import AssetDetailsDrawer from '@/components/assets/AssetDetailsDrawer';
+import AssetBillViewer from '@/components/assets/AssetBillViewer';
 import AssignAssetModal from '@/components/assets/AssignAssetModal';
 import ReturnAssetModal from '@/components/assets/ReturnAssetModal';
 import useServerTable, { PAGE_SIZE_OPTIONS } from '@/hooks/useServerTable';
@@ -32,6 +35,15 @@ const CONDITION_OPTIONS = toOptions(ASSET_CONDITIONS);
 const WARRANTY_OPTIONS = toOptions(WARRANTY_STATUSES);
 const CLOSED_MODAL = { open: false, assetId: null };
 
+/** Why an unassigned asset can't be assigned right now (null = it can). */
+function assignBlockedReason(asset) {
+  if (!isSingleUnit(asset)) {
+    return `Quantity limitation: this asset has a quantity of ${asset.quantity}, so you can't assign it. Only assets with quantity 1 can be assigned.`;
+  }
+  if (asset.status !== 'Available') return 'Only Available assets can be assigned';
+  return null;
+}
+
 export default function AssetsView() {
   const dispatch = useDispatch();
   const { modal, message } = App.useApp();
@@ -41,6 +53,7 @@ export default function AssetsView() {
   const [viewing, setViewing] = useState(null);
   const [assigning, setAssigning] = useState(null);
   const [returning, setReturning] = useState(null);
+  const [viewingBill, setViewingBill] = useState(null); // { assetId, bill }
 
   // Employee list for the "Assigned to" filter.
   useEffect(() => {
@@ -111,7 +124,7 @@ export default function AssetsView() {
 
   const columns = useMemo(
     () => [
-      { title: 'Asset ID', dataIndex: 'assetId', key: 'assetId', width: 110, fixed: 'left', sorter: true, sortOrder: sortOrderFor('assetId') },
+      { title: 'Asset ID', dataIndex: 'assetId', key: 'assetId', width: 200, fixed: 'left', sorter: true, sortOrder: sortOrderFor('assetId') },
       {
         title: 'Item',
         dataIndex: 'itemName',
@@ -129,6 +142,7 @@ export default function AssetsView() {
           </Space>
         ),
       },
+      { title: 'Qty', dataIndex: 'quantity', key: 'quantity', width: 80, align: 'right', sorter: true, sortOrder: sortOrderFor('quantity'), render: (v) => v ?? 1 },
       { title: 'Category', dataIndex: 'category', key: 'category', width: 130, sorter: true, sortOrder: sortOrderFor('category') },
       { title: 'Serial No.', dataIndex: 'serialNumber', key: 'serialNumber', width: 140, render: (v) => v || '—' },
       { title: 'Condition', dataIndex: 'condition', key: 'condition', width: 115, sorter: true, sortOrder: sortOrderFor('condition'), render: (v) => <StatusTag value={v} /> },
@@ -156,26 +170,49 @@ export default function AssetsView() {
           ),
       },
       {
+        title: 'Bill',
+        dataIndex: 'bill',
+        key: 'bill',
+        width: 100,
+        align: 'center',
+        // A labelled file button, so it isn't mistaken for the eye icon (view details) under Actions.
+        render: (bill, r) =>
+          bill ? (
+            <Tooltip title={`View bill · ${bill.filename}`}>
+              <Button
+                size="small"
+                icon={bill.contentType === 'application/pdf' ? <FilePdfOutlined /> : <FileImageOutlined />}
+                aria-label="View bill"
+                onClick={() => setViewingBill({ assetId: r._id, bill })}
+              >
+                Bill
+              </Button>
+            </Tooltip>
+          ) : (
+            <span className="muted">—</span>
+          ),
+      },
+      {
         title: 'Actions',
         key: 'actions',
         width: 170,
         fixed: 'right',
         render: (_, record) => (
           <Space size={2}>
-            <Tooltip title="View">
-              <Button type="text" icon={<EyeOutlined />} aria-label="View asset" onClick={() => setViewing(record)} />
+            <Tooltip title="View details">
+              <Button type="text" icon={<EyeOutlined />} aria-label="View asset details" onClick={() => setViewing(record)} />
             </Tooltip>
             {record.assignedTo ? (
               <Tooltip title={`Return from ${record.assignedTo.fullName}`}>
                 <Button type="text" icon={<RollbackOutlined />} aria-label="Return asset" onClick={() => setReturning(record)} />
               </Tooltip>
             ) : (
-              <Tooltip title={record.status === 'Available' ? 'Assign to employee' : `Only Available assets can be assigned`}>
+              <Tooltip title={assignBlockedReason(record) || 'Assign to employee'}>
                 <Button
                   type="text"
                   icon={<UserAddOutlined />}
                   aria-label="Assign asset"
-                  disabled={record.status !== 'Available'}
+                  disabled={Boolean(assignBlockedReason(record))}
                   onClick={() => setAssigning(record)}
                 />
               </Tooltip>
@@ -288,7 +325,7 @@ export default function AssetsView() {
           columns={columns}
           dataSource={items}
           loading={{ spinning: loading, tip: 'Loading assets…' }}
-          scroll={{ x: 1690 }}
+          scroll={{ x: 1960 }}
           pagination={pagination}
           onChange={onTableChange}
           locale={{ emptyText }}
@@ -303,6 +340,7 @@ export default function AssetsView() {
         onAssign={setAssigning}
         onReturn={setReturning}
       />
+      <AssetBillViewer target={viewingBill} onClose={() => setViewingBill(null)} />
       <AssignAssetModal
         open={Boolean(assigning)}
         asset={assigning}
