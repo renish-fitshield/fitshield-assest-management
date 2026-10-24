@@ -10,6 +10,8 @@ export const fetchAssetById = apiThunk('assets/fetchOne', (id, { signal }) => ap
 export const createAsset = apiThunk('assets/create', (payload) => api.post('/assets', payload));
 export const updateAsset = apiThunk('assets/update', ({ id, data }) => api.put(`/assets/${id}`, data));
 export const deleteAsset = apiThunk('assets/delete', (id) => api.delete(`/assets/${id}`));
+/** Brand suggestions: built-in list + brands users have added (→ { items: [name] }). */
+export const fetchBrandOptions = apiThunk('assets/brands', (_, { signal }) => api.get('/brands', { signal }));
 
 // Assignment: one asset → one employee. Body: { employeeId, assignedAt?, notes? }
 export const assignAsset = apiThunk('assets/assign', ({ id, data }) => api.post(`/assets/${id}/assign`, data));
@@ -18,12 +20,12 @@ export const returnAsset = apiThunk('assets/return', ({ id, data }) => api.post(
 export const fetchAssetAssignments = apiThunk('assets/assignments', (id, { signal }) =>
   api.get(`/assets/${id}/assignments`, { signal })
 );
-/** Available assets for the "assign to employee" picker (server-side search, same list API). */
+/** Assets that can be assigned (Available, quantity 1) for the "assign to employee" picker. */
 export const searchAssignableAssets = apiThunk('assets/searchAssignable', (searchText, { signal }) =>
   api.post(
     '/assets/list',
     {
-      filter: { status: 'Available', ...(searchText ? { searchText } : {}) },
+      filter: { assignable: 'true', ...(searchText ? { searchText } : {}) },
       pagination_info: { page: 1, perPageData: 20 },
       sort: { sortBy: 'assetId', data: SORT_DATA.ASC },
     },

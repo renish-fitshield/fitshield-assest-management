@@ -1,5 +1,5 @@
 import { ApiError, isValidId } from '@/lib/api';
-import { ASSET_CONDITIONS, RETURN_STATUSES } from '@/lib/constants';
+import { ASSET_CONDITIONS, RETURN_STATUSES, isSingleUnit } from '@/lib/constants';
 import Asset from '@/models/Asset';
 import Employee from '@/models/Employee';
 import Assignment from '@/models/Assignment';
@@ -67,6 +67,12 @@ export async function assignAsset({ assetId, body, userId }) {
   if (asset.status !== 'Available') {
     throw new ApiError(`Only Available assets can be assigned — ${asset.assetId} is ${asset.status}.`, 409);
   }
+  if (!isSingleUnit(asset)) {
+    throw new ApiError(
+      `${asset.assetId} has a quantity of ${asset.quantity}. Only assets with quantity 1 can be assigned to an employee.`,
+      409
+    );
+  }
 
   const assignedAt = parseEventDate(body.assignedAt, 'assignedAt', 'Assignment date');
   if (asset.purchaseDate && dayStart(assignedAt) < dayStart(asset.purchaseDate)) {
@@ -77,7 +83,7 @@ export async function assignAsset({ assetId, body, userId }) {
   const notes = optionalText(body.notes, 'notes');
 
   const updated = await Asset.findOneAndUpdate(
-    { _id: asset._id, assignedTo: null, status: 'Available' },
+    { _id: asset._id, assignedTo: null, status: 'Available', quantity: { $not: { $gt: 1 } } },
     { $set: { assignedTo: employee._id, assignedAt, status: 'Assigned' } },
     { new: true }
   );
@@ -103,10 +109,7 @@ export async function assignAsset({ assetId, body, userId }) {
     throw err;
   }
 
-  return updated.populate([
-    { path: 'assignedTo', select: HOLDER_FIELDS },
-    { path: 'purchasedBy', select: 'employeeId fullName' },
-  ]);
+  return updated.populate({ path: 'assignedTo', select: HOLDER_FIELDS });
 }
 
 /** Return an assigned asset; optionally record its condition and send it for repair. */
@@ -162,7 +165,7 @@ export async function returnAsset({ assetId, body, userId }) {
     await open.save();
   }
 
-  return updated.populate({ path: 'purchasedBy', select: 'employeeId fullName' });
+  return updated;
 }
 
 /** Assignment history for an asset or an employee (newest first). */
