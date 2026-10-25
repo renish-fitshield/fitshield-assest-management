@@ -3,8 +3,10 @@ import { ok, fail, handleError, pickFields, isValidId, readJson } from '@/lib/ap
 import { deleteImage } from '@/lib/assetImages';
 import { storeBill, deleteBill } from '@/lib/assetBills';
 import { HOLDER_FIELDS } from '@/lib/assignments';
-import Asset, { ASSET_FIELDS } from '@/models/Asset';
+import Asset, { ASSET_FIELDS, WITHOUT_HISTORY } from '@/models/Asset';
 import { resolveBrand } from '@/models/Brand';
+import { setAssetCategory } from '@/lib/categories';
+import { activity, diff, getActor, snapshot } from '@/lib/activity';
 
 const POPULATE = [{ path: 'assignedTo', select: HOLDER_FIELDS }];
 
@@ -13,7 +15,7 @@ export async function GET(_req, { params }) {
     const { id } = await params;
     if (!isValidId(id)) return fail('Invalid asset id', 400);
     await connectDB();
-    const asset = await Asset.findById(id).populate(POPULATE);
+    const asset = await Asset.findById(id).select(WITHOUT_HISTORY).populate(POPULATE);
     if (!asset) return fail('Asset not found', 404);
     return ok({ item: asset });
   } catch (err) {
@@ -37,6 +39,7 @@ export async function PUT(req, { params }) {
     // Load + save (instead of findByIdAndUpdate) so cross-field validators see the whole document.
     const asset = await Asset.findById(id);
     if (!asset) return fail('Asset not found', 404);
+    const before = snapshot(asset);
 
     // "Assigned" is controlled by the assign/return APIs so status and holder never disagree.
     if (data.status === 'Assigned' && !asset.assignedTo) {
@@ -54,6 +57,7 @@ export async function PUT(req, { params }) {
     }
 
     asset.set(data);
+    if (asset.isModified('categoryId')) await setAssetCategory(asset);
     if (asset.brand && asset.isModified('brand')) {
       await asset.validate(); // don't save a new brand for an update that's going to be rejected
       asset.brand = await resolveBrand(asset.brand);
@@ -69,7 +73,12 @@ export async function PUT(req, { params }) {
       asset.bill = null;
     }
 
-    // Fail (409) instead of overwriting if the asset was assigned/returned since we loaded it.
+    // Logged in the same save as the change itself; nothing is logged if nothing changed.
+    const changes = diff(before, snapshot(asset));
+    if (changes.length) asset.activities.push(activity('Updated', await getActor(req), { changes }));
+
+    // Fail (409) instead of overwriting if the asset changed since we loaded it (the version check, plus
+    // this guard for its holder), so the "before" values in the log are always what was really there.
     asset.$where = { assignedTo: asset.assignedTo ?? null };
     try {
       await asset.save();

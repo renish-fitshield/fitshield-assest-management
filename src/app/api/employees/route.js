@@ -1,7 +1,7 @@
 import { connectDB } from '@/lib/db';
 import { ok, handleError, pickFields, readJson } from '@/lib/api';
 import Employee, { EMPLOYEE_FIELDS } from '@/models/Employee';
-import { nextSequenceId } from '@/models/Counter';
+import { nextEmployeeId } from '@/lib/employeeId';
 
 // Listing (search / filters / sorting / pagination) is POST /api/employees/list.
 
@@ -12,7 +12,8 @@ export async function POST(req) {
 
     const employee = new Employee({ ...data, employeeId: 'pending' });
     await employee.validate();
-    employee.employeeId = await nextSequenceId('employee', 'EMP');
+    // FSEMP-<department>-<serial>, given once (validated first, so a rejected form uses no number).
+    employee.employeeId = await nextEmployeeId(employee.department);
     await employee.save();
 
     return ok({ item: employee, message: 'Employee created' }, 201);

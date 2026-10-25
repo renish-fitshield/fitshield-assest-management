@@ -1,12 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { App, AutoComplete, Col, DatePicker, Form, Input, Modal, Row, Select, Spin } from 'antd';
-import { DEPARTMENTS, WORK_TYPES, EMPLOYEE_STATUSES, LOCATIONS } from '@/lib/constants';
+import { App, AutoComplete, Col, DatePicker, Form, Input, Modal, Radio, Row, Select, Spin } from 'antd';
+import {
+  DEPARTMENTS,
+  WORK_TYPES,
+  EMPLOYEE_STATUSES,
+  EMPLOYMENT_TYPES,
+  DEFAULT_EMPLOYMENT_TYPE,
+  LOCATIONS,
+  WORK_EMAIL_DOMAIN,
+  employeeEmailError,
+} from '@/lib/constants';
 import { toDayjs } from '@/lib/format';
 import { applyServerErrors, maxLen, requiredText, trimStart, validateOrScroll } from '@/lib/forms';
 import ErrorState from '@/components/ErrorState';
+import ResetFormOnOpen from '@/components/ResetFormOnOpen';
 import { createEmployee, fetchEmployeeById, updateEmployee } from '@/store/employeesSlice';
 
 const toOptions = (list) => list.map((v) => ({ label: v, value: v }));
@@ -15,11 +25,16 @@ const WORK_TYPE_OPTIONS = toOptions(WORK_TYPES);
 const STATUS_OPTIONS = toOptions(EMPLOYEE_STATUSES);
 const LOCATION_OPTIONS = toOptions(LOCATIONS);
 const filterAutoComplete = (input, option) => option.value.toLowerCase().includes(input.toLowerCase());
-const NEW_EMPLOYEE_DEFAULTS = { status: 'Active' };
+const EMPLOYMENT_TYPE_OPTIONS = toOptions(EMPLOYMENT_TYPES);
+const NEW_EMPLOYEE_DEFAULTS = { status: 'Active', employmentType: DEFAULT_EMPLOYMENT_TYPE };
 
 function toFormValues(employee) {
   if (!employee) return NEW_EMPLOYEE_DEFAULTS;
-  return { ...employee, joiningDate: toDayjs(employee.joiningDate) };
+  return {
+    ...employee,
+    employmentType: employee.employmentType || DEFAULT_EMPLOYMENT_TYPE,
+    joiningDate: toDayjs(employee.joiningDate),
+  };
 }
 
 const contactNumberRule = {
@@ -68,6 +83,7 @@ export default function EmployeeFormModal({ open, employeeId, onClose, onSaved }
   }, [open, employeeId, reloadKey, dispatch]);
 
   const initialValues = useMemo(() => toFormValues(record.employee), [record.employee]);
+  const intern = Form.useWatch('employmentType', form) === 'Intern';
 
   const handleSubmit = useCallback(async () => {
     const values = await validateOrScroll(form);
@@ -91,12 +107,6 @@ export default function EmployeeFormModal({ open, employeeId, onClose, onSaved }
 
   const waitingForRecord = isEdit && (record.loading || (!record.employee && !record.error));
   const showForm = open && !record.error && !waitingForRecord;
-
-  // The form instance outlives each open, and a remounted <Form> merges its initialValues *under* the
-  // values it still holds — so reset once it's showing, or the previously edited employee's data leaks in.
-  useLayoutEffect(() => {
-    if (showForm) form.resetFields();
-  }, [showForm, initialValues, form]);
 
   let body;
   if (record.error) {
@@ -122,6 +132,7 @@ export default function EmployeeFormModal({ open, employeeId, onClose, onSaved }
         form={form}
         layout="vertical"
         preserve={false}
+        clearOnDestroy
         initialValues={initialValues}
         disabled={saving}
         style={{ marginTop: 16 }}
@@ -144,16 +155,38 @@ export default function EmployeeFormModal({ open, employeeId, onClose, onSaved }
           </Col>
           <Col xs={24} md={12}>
             <Form.Item
+              label="Employment Type"
+              name="employmentType"
+              rules={[{ required: true, message: 'Employment type is required' }]}
+              tooltip={`Full-Time employees need a company email (@${WORK_EMAIL_DOMAIN}); interns can use any valid email`}
+            >
+              <Radio.Group optionType="button" buttonStyle="solid" options={EMPLOYMENT_TYPE_OPTIONS} />
+            </Form.Item>
+          </Col>
+          <Col xs={24} md={12}>
+            <Form.Item
               label="Work Email"
               name="workEmail"
               normalize={(v) => (typeof v === 'string' ? v.trim().toLowerCase() : v)}
+              // Re-checked when the employment type changes (an intern's gmail stops being valid for Full-Time).
+              dependencies={['employmentType']}
+              validateTrigger={['onChange', 'onBlur']}
+              extra={intern ? 'Interns can use any valid email.' : `Company email only: must end with @${WORK_EMAIL_DOMAIN}.`}
               rules={[
                 { required: true, message: 'Work email is required' },
-                { type: 'email', message: 'Enter a valid email address' },
                 maxLen(254),
+                // The domain rule is checked when leaving the field (and on save), not on every keystroke.
+                ({ getFieldValue }) => ({
+                  validateTrigger: 'onBlur',
+                  validator(_, value) {
+                    if (!value) return Promise.resolve();
+                    const error = employeeEmailError(value, getFieldValue('employmentType'));
+                    return error ? Promise.reject(new Error(error)) : Promise.resolve();
+                  },
+                }),
               ]}
             >
-              <Input placeholder="name@company.com" maxLength={254} />
+              <Input placeholder={intern ? 'johndoe@gmail.com' : `johndoe@${WORK_EMAIL_DOMAIN}`} maxLength={254} autoComplete="off" />
             </Form.Item>
           </Col>
           <Col xs={24} md={12}>
@@ -203,6 +236,8 @@ export default function EmployeeFormModal({ open, employeeId, onClose, onSaved }
             </Form.Item>
           </Col>
         </Row>
+        {/* Last child: starts every Add / Edit from this employee's values, never the previous one's. */}
+        <ResetFormOnOpen form={form} open={showForm} values={initialValues} />
       </Form>
     );
   }

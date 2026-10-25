@@ -3,13 +3,15 @@
 /**
  * In-app navigation without Next.js RSC requests (`/page?_rsc=…`).
  *
- * Dashboard, Assets and People are all rendered by one route (app/(dashboard)/[[...slug]]),
- * so switching between them only needs the URL to change. Next.js keeps `usePathname()`
- * in sync with native `history.pushState`, and Back/Forward restore without a fetch.
+ * Every app page is rendered by one route (app/(dashboard)/[[...slug]]), so switching between them
+ * only needs the URL to change. Next.js keeps `usePathname()` in sync with native
+ * `history.pushState`, and Back/Forward restore without a fetch.
  * Crossing into or out of that route (login / logout) uses a full page load.
+ * Keep this list in step with VIEWS in app/(dashboard)/[[...slug]]/page.js — a page missing here
+ * would reload the whole app (and its loaded data) every time it's opened.
  */
 
-export const APP_ROUTES = ['/dashboard', '/assets', '/people'];
+export const APP_ROUTES = ['/dashboard', '/assets', '/assignments', '/categories', '/people'];
 
 const isAppRoute = (path) => APP_ROUTES.includes(path);
 

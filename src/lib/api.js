@@ -8,10 +8,12 @@ export const fail = (message, status = 400, extra = {}) =>
 
 /** Throw from anywhere in a route to return a clean 4xx with an optional per-field error map. */
 export class ApiError extends Error {
-  constructor(message, status = 400, fields) {
+  /** `code` (optional) is a stable machine-readable reason, e.g. "LINK_EXPIRED". */
+  constructor(message, status = 400, fields, code) {
     super(message);
     this.status = status;
     this.fields = fields;
+    this.code = code;
   }
 }
 
@@ -19,7 +21,7 @@ const DUPLICATE_LABELS = { workEmail: 'work email', assetId: 'asset ID', employe
 
 export function handleError(err) {
   if (err instanceof ApiError) {
-    return fail(err.message, err.status, err.fields ? { fields: err.fields } : {});
+    return fail(err.message, err.status, { ...(err.fields ? { fields: err.fields } : {}), ...(err.code ? { code: err.code } : {}) });
   }
   if (err instanceof mongoose.Error.ValidationError) {
     // `fields` lets the UI show each message under the matching form input.
@@ -34,7 +36,7 @@ export function handleError(err) {
     const message = `A record with this ${DUPLICATE_LABELS[field] || field} already exists`;
     return fail(message, 409, { fields: { [field]: message } });
   }
-  if (err instanceof mongoose.Error.DocumentNotFoundError) {
+  if (err instanceof mongoose.Error.DocumentNotFoundError || err instanceof mongoose.Error.VersionError) {
     return fail('This record was changed by someone else. Refresh and try again.', 409);
   }
   if (err instanceof SyntaxError) {

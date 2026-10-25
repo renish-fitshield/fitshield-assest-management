@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { App, Button, Card, Empty, Input, Select, Space, Table, Tooltip, Typography } from 'antd';
+import { App, Button, Card, Empty, Input, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import {
   ClearOutlined,
   DeleteOutlined,
@@ -12,27 +12,40 @@ import {
   FilePdfOutlined,
   PlusOutlined,
   RollbackOutlined,
+  SwapOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
-import { ASSET_CATEGORIES, ASSET_STATUSES, ASSET_CONDITIONS, WARRANTY_STATUSES, isSingleUnit } from '@/lib/constants';
-import { formatCurrency, formatDate } from '@/lib/format';
+import {
+  ASSET_STATUSES,
+  ASSET_CONDITIONS,
+  WARRANTY_STATUSES,
+  RETURN_DUE_FILTERS,
+  isReturnOverdue,
+  isSingleUnit,
+} from '@/lib/constants';
+import { formatDate } from '@/lib/format';
+import { confirmAction, CONFIRM_MESSAGES } from '@/lib/confirm';
+import CompactCurrency from '@/components/CompactCurrency';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
+import DataLoader from '@/components/DataLoader';
+import MoreFilters, { FilterChips } from '@/components/MoreFilters';
 import AssetImage from '@/components/assets/AssetImage';
 import AssetFormModal from '@/components/assets/AssetFormModal';
 import AssetDetailsDrawer from '@/components/assets/AssetDetailsDrawer';
 import AssetBillViewer from '@/components/assets/AssetBillViewer';
-import AssignAssetModal from '@/components/assets/AssignAssetModal';
-import ReturnAssetModal from '@/components/assets/ReturnAssetModal';
+import AssignmentModal from '@/components/assets/AssignmentModal';
 import useServerTable, { PAGE_SIZE_OPTIONS } from '@/hooks/useServerTable';
+import useRefreshOnFocus from '@/hooks/useRefreshOnFocus';
+import useCategories from '@/hooks/useCategories';
 import { fetchAssets, deleteAsset, setAssetQuery, resetAssetFilters, ASSET_FILTER_KEYS } from '@/store/assetsSlice';
 import { fetchEmployeeOptions } from '@/store/employeesSlice';
 
 const toOptions = (list) => list.map((v) => ({ label: v, value: v }));
-const CATEGORY_OPTIONS = toOptions(ASSET_CATEGORIES);
 const STATUS_OPTIONS = toOptions(ASSET_STATUSES);
 const CONDITION_OPTIONS = toOptions(ASSET_CONDITIONS);
 const WARRANTY_OPTIONS = toOptions(WARRANTY_STATUSES);
+const RETURN_DUE_OPTIONS = toOptions(RETURN_DUE_FILTERS);
 const CLOSED_MODAL = { open: false, assetId: null };
 
 /** Why an unassigned asset can't be assigned right now (null = it can). */
@@ -51,8 +64,7 @@ export default function AssetsView() {
   const { options: employees, optionsLoading: employeesLoading } = useSelector((s) => s.employees);
   const [modalState, setModalState] = useState(CLOSED_MODAL);
   const [viewing, setViewing] = useState(null);
-  const [assigning, setAssigning] = useState(null);
-  const [returning, setReturning] = useState(null);
+  const [handOver, setHandOver] = useState(null); // { mode: 'assign' | 'transfer' | 'return', asset }
   const [viewingBill, setViewingBill] = useState(null); // { assetId, bill }
 
   // Employee list for the "Assigned to" filter.
@@ -61,9 +73,23 @@ export default function AssetsView() {
     return () => promise.abort();
   }, [dispatch]);
 
+  const { options: categoryOptions, loading: categoriesLoading } = useCategories();
+
   const employeeFilterOptions = useMemo(
     () => employees.map((e) => ({ value: e._id, label: `${e.fullName} (${e.employeeId})` })),
     [employees]
+  );
+
+  // Search, Category and Status stay on the page; the rest sit behind "More filters" (applied with
+  // its Apply button) and show as chips while they're set.
+  const moreFields = useMemo(
+    () => [
+      { key: 'condition', label: 'Condition', options: CONDITION_OPTIONS },
+      { key: 'warrantyStatus', label: 'Warranty', options: WARRANTY_OPTIONS },
+      { key: 'assignedTo', label: 'Assigned to', placeholder: 'Anyone', options: employeeFilterOptions, showSearch: true, loading: employeesLoading },
+      { key: 'returnDue', label: 'Return due', placeholder: 'Any return date', options: RETURN_DUE_OPTIONS },
+    ],
+    [employeeFilterOptions, employeesLoading]
   );
 
   const {
@@ -76,6 +102,20 @@ export default function AssetsView() {
     setSearchText,
     submitSearch,
   } = useServerTable({ query, fetchThunk: fetchAssets, setQueryAction: setAssetQuery, filterKeys: ASSET_FILTER_KEYS });
+  // Coming back to this tab reloads the list (e.g. to show acknowledgements made from the email).
+  useRefreshOnFocus(refetch);
+
+  const moreChips = useMemo(
+    () =>
+      moreFields
+        .filter((f) => query[f.key])
+        .map((f) => ({
+          key: f.key,
+          label: `${f.label}: ${f.options.find((o) => o.value === query[f.key])?.label || 'Selected'}`,
+          onClose: () => setFilter({ [f.key]: null }),
+        })),
+    [moreFields, query, setFilter]
+  );
 
   const clearFilters = useCallback(() => dispatch(resetAssetFilters()), [dispatch]);
   const openCreate = useCallback(() => setModalState({ open: true, assetId: null }), []);
@@ -87,12 +127,15 @@ export default function AssetsView() {
     refetch();
   }, [refetch]);
 
-  // After assign/return: refresh the table and keep an open details drawer in sync.
+  const openHandOver = useCallback((mode, asset) => setHandOver({ mode, asset }), []);
+
+  // After assign/transfer/return: refresh the table and keep an open details drawer in sync.
+  // `updated` is null when the outcome isn't known (timeout) or the data was stale — then the drawer
+  // would show outdated details, so it's closed.
   const handleAssignmentChange = useCallback(
     (updated) => {
-      setAssigning(null);
-      setReturning(null);
-      setViewing((v) => (v && updated && v._id === updated._id ? updated : v));
+      setHandOver(null);
+      setViewing((v) => (!v ? v : !updated ? null : v._id === updated._id ? updated : v));
       refetch();
     },
     [refetch]
@@ -100,14 +143,11 @@ export default function AssetsView() {
 
   const confirmDelete = useCallback(
     (asset) => {
-      modal.confirm({
-        title: 'Are you sure you want to delete this asset?',
-        content: `${asset.assetId} · ${asset.itemName} will be permanently deleted. This cannot be undone.`,
-        okText: 'Yes, delete',
-        okType: 'danger',
-        cancelText: 'Cancel',
-        // Returning the promise keeps the OK button spinning until the request finishes.
-        onOk: async () => {
+      confirmAction(modal, {
+        title: CONFIRM_MESSAGES.delete,
+        danger: true,
+        // Returning the promise keeps Yes spinning until the request finishes.
+        onYes: async () => {
           try {
             const result = await dispatch(deleteAsset(asset._id)).unwrap();
             message.success(result.message || 'Asset deleted');
@@ -148,13 +188,13 @@ export default function AssetsView() {
       { title: 'Condition', dataIndex: 'condition', key: 'condition', width: 115, sorter: true, sortOrder: sortOrderFor('condition'), render: (v) => <StatusTag value={v} /> },
       { title: 'Status', dataIndex: 'status', key: 'status', width: 125, sorter: true, sortOrder: sortOrderFor('status'), render: (v) => <StatusTag value={v} /> },
       { title: 'Warranty', dataIndex: 'warrantyStatus', key: 'warrantyUntil', width: 135, sorter: true, sortOrder: sortOrderFor('warrantyUntil'), render: (v) => <StatusTag value={v} /> },
-      { title: 'Cost', dataIndex: 'cost', key: 'cost', width: 125, align: 'right', sorter: true, sortOrder: sortOrderFor('cost'), render: formatCurrency },
+      { title: 'Cost', dataIndex: 'cost', key: 'cost', width: 125, align: 'right', sorter: true, sortOrder: sortOrderFor('cost'), render: (v) => <CompactCurrency value={v} /> },
       { title: 'Location', dataIndex: 'location', key: 'location', width: 120, sorter: true, sortOrder: sortOrderFor('location'), render: (v) => v || '—' },
       {
         title: 'Assigned To',
         dataIndex: 'assignedTo',
         key: 'assignedAt',
-        width: 190,
+        width: 210,
         sorter: true,
         sortOrder: sortOrderFor('assignedAt'),
         render: (holder, r) =>
@@ -164,6 +204,27 @@ export default function AssetsView() {
               <div className="muted">
                 {holder.employeeId} · since {formatDate(r.assignedAt)}
               </div>
+              {r.acknowledgement && (
+                <Tooltip
+                  title={
+                    r.acknowledgement.status === 'Acknowledged'
+                      ? `Acknowledged on ${formatDate(r.acknowledgement.acknowledgedAt)}`
+                      : `Waiting for ${holder.fullName} to acknowledge receipt (emailed)`
+                  }
+                >
+                  <Tag color={r.acknowledgement.status === 'Acknowledged' ? 'green' : 'gold'} style={{ marginTop: 2 }}>
+                    {r.acknowledgement.status === 'Acknowledged' ? 'Acknowledged' : 'Ack pending'}
+                  </Tag>
+                </Tooltip>
+              )}
+              {r.expectedReturnAt &&
+                (isReturnOverdue(r) ? (
+                  <Tag color="red" style={{ marginTop: 2 }}>
+                    Overdue · due {formatDate(r.expectedReturnAt)}
+                  </Tag>
+                ) : (
+                  <div className="muted">Due back {formatDate(r.expectedReturnAt)}</div>
+                ))}
             </div>
           ) : (
             <span className="muted">—</span>
@@ -195,17 +256,22 @@ export default function AssetsView() {
       {
         title: 'Actions',
         key: 'actions',
-        width: 170,
+        width: 200,
         fixed: 'right',
         render: (_, record) => (
           <Space size={2}>
-            <Tooltip title="View details">
+            <Tooltip title="View details & history">
               <Button type="text" icon={<EyeOutlined />} aria-label="View asset details" onClick={() => setViewing(record)} />
             </Tooltip>
             {record.assignedTo ? (
-              <Tooltip title={`Return from ${record.assignedTo.fullName}`}>
-                <Button type="text" icon={<RollbackOutlined />} aria-label="Return asset" onClick={() => setReturning(record)} />
-              </Tooltip>
+              <>
+                <Tooltip title={`Transfer from ${record.assignedTo.fullName} to someone else`}>
+                  <Button type="text" icon={<SwapOutlined />} aria-label="Transfer asset" onClick={() => openHandOver('transfer', record)} />
+                </Tooltip>
+                <Tooltip title={`Return from ${record.assignedTo.fullName}`}>
+                  <Button type="text" icon={<RollbackOutlined />} aria-label="Return asset" onClick={() => openHandOver('return', record)} />
+                </Tooltip>
+              </>
             ) : (
               <Tooltip title={assignBlockedReason(record) || 'Assign to employee'}>
                 <Button
@@ -213,7 +279,7 @@ export default function AssetsView() {
                   icon={<UserAddOutlined />}
                   aria-label="Assign asset"
                   disabled={Boolean(assignBlockedReason(record))}
-                  onClick={() => setAssigning(record)}
+                  onClick={() => openHandOver('assign', record)}
                 />
               </Tooltip>
             )}
@@ -234,7 +300,7 @@ export default function AssetsView() {
         ),
       },
     ],
-    [sortOrderFor, openEdit, confirmDelete]
+    [sortOrderFor, openEdit, confirmDelete, openHandOver]
   );
 
   const pagination = useMemo(
@@ -296,61 +362,41 @@ export default function AssetsView() {
             onChange={(e) => setSearchText(e.target.value)}
             onSearch={submitSearch}
           />
-          <Select placeholder="Category" allowClear showSearch value={query.category} options={CATEGORY_OPTIONS} onChange={(v) => setFilter({ category: v ?? null })} />
+          <Select placeholder="Category" allowClear showSearch optionFilterProp="label" loading={categoriesLoading} value={query.categoryId} options={categoryOptions} onChange={(v) => setFilter({ categoryId: v ?? null })} />
           <Select placeholder="Status" allowClear value={query.status} options={STATUS_OPTIONS} onChange={(v) => setFilter({ status: v ?? null })} />
-          <Select placeholder="Condition" allowClear value={query.condition} options={CONDITION_OPTIONS} onChange={(v) => setFilter({ condition: v ?? null })} />
-          <Select placeholder="Warranty" allowClear value={query.warrantyStatus} options={WARRANTY_OPTIONS} onChange={(v) => setFilter({ warrantyStatus: v ?? null })} />
-          <Select
-            placeholder="Assigned to"
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            style={{ minWidth: 220 }}
-            loading={employeesLoading}
-            value={query.assignedTo}
-            options={employeeFilterOptions}
-            onChange={(v) => setFilter({ assignedTo: v ?? null })}
-          />
+          <MoreFilters fields={moreFields} values={query} onApply={setFilter} />
           {activeFilterCount > 0 && (
             <Button icon={<ClearOutlined />} onClick={clearFilters}>
               Clear ({activeFilterCount})
             </Button>
           )}
         </div>
+        <FilterChips chips={moreChips} />
 
         {error && <ErrorState message={error} onRetry={refetch} retrying={loading} />}
 
-        <Table
-          rowKey="_id"
-          columns={columns}
-          dataSource={items}
-          loading={{ spinning: loading, tip: 'Loading assets…' }}
-          scroll={{ x: 1960 }}
-          pagination={pagination}
-          onChange={onTableChange}
-          locale={{ emptyText }}
-          showSorterTooltip={false}
-        />
+        <DataLoader ready={loaded || Boolean(error)} loading={loading} dataKey={JSON.stringify(query)}>
+          <Table
+            rowKey="_id"
+            columns={columns}
+            dataSource={items}
+            scroll={{ x: 2010 }}
+            pagination={pagination}
+            onChange={onTableChange}
+            locale={{ emptyText }}
+            showSorterTooltip={false}
+          />
+        </DataLoader>
       </Card>
 
       <AssetFormModal open={modalState.open} assetId={modalState.assetId} onClose={closeModal} onSaved={handleSaved} />
-      <AssetDetailsDrawer
-        asset={viewing}
-        onClose={() => setViewing(null)}
-        onAssign={setAssigning}
-        onReturn={setReturning}
-      />
+      <AssetDetailsDrawer asset={viewing} onClose={() => setViewing(null)} onAction={openHandOver} />
       <AssetBillViewer target={viewingBill} onClose={() => setViewingBill(null)} />
-      <AssignAssetModal
-        open={Boolean(assigning)}
-        asset={assigning}
-        onClose={() => setAssigning(null)}
-        onDone={handleAssignmentChange}
-      />
-      <ReturnAssetModal
-        open={Boolean(returning)}
-        asset={returning}
-        onClose={() => setReturning(null)}
+      <AssignmentModal
+        open={Boolean(handOver)}
+        mode={handOver?.mode}
+        asset={handOver?.asset}
+        onClose={() => setHandOver(null)}
         onDone={handleAssignmentChange}
       />
     </>

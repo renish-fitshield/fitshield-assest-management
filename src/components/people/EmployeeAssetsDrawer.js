@@ -3,40 +3,85 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { Button, Divider, Drawer, Empty, List, Skeleton, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { PlusOutlined, RollbackOutlined } from '@ant-design/icons';
+import { PlusOutlined, RollbackOutlined, SwapOutlined } from '@ant-design/icons';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
 import AssetImage from '@/components/assets/AssetImage';
-import AssignAssetModal from '@/components/assets/AssignAssetModal';
-import ReturnAssetModal from '@/components/assets/ReturnAssetModal';
-import { formatDate } from '@/lib/format';
+import AssignmentModal from '@/components/assets/AssignmentModal';
+import { isReturnOverdue } from '@/lib/constants';
+import { formatDate, formatDateTime } from '@/lib/format';
 import { fetchEmployeeAssets } from '@/store/employeesSlice';
+
+const holderText = (h) => (h ? `${h.fullName}${h.employeeId ? ` (${h.employeeId})` : ''}` : 'someone');
+
+const AckTag = ({ ack }) => (
+  <Tooltip title={ack.status === 'Acknowledged' ? `Acknowledged on ${formatDateTime(ack.acknowledgedAt)}` : 'Not acknowledged yet'}>
+    <Tag color={ack.status === 'Acknowledged' ? 'green' : 'gold'} style={{ marginTop: 2 }}>
+      {ack.status === 'Acknowledged' ? 'Acknowledged' : 'Ack pending'}
+    </Tag>
+  </Tooltip>
+);
 
 const HISTORY_COLUMNS = [
   {
     title: 'Asset',
-    dataIndex: 'asset',
-    render: (a) => (a ? `${a.assetId} · ${a.itemName}` : <span className="muted">Deleted asset</span>),
+    key: 'asset',
+    render: (_, p) => (
+      <div>
+        <Typography.Text>{p.asset.itemName}</Typography.Text>
+        <div className="muted">
+          {p.asset.assetId}
+          {p.asset.category ? ` · ${p.asset.category}` : ''}
+        </div>
+      </div>
+    ),
   },
-  { title: 'From', dataIndex: 'assignedAt', width: 110, render: formatDate },
   {
-    title: 'To',
-    dataIndex: 'returnedAt',
-    width: 110,
-    render: (v, r) => (r.active ? <Tag color="blue">Current</Tag> : formatDate(v)),
+    title: 'Received',
+    key: 'startedAt',
+    width: 190,
+    render: (_, p) => (
+      <div>
+        {formatDate(p.startedAt)}
+        <div className="muted">
+          {p.receivedFrom ? `from ${holderText(p.receivedFrom)}` : 'assigned'}
+          {p.assignedBy?.name ? ` · by ${p.assignedBy.name}` : ''}
+        </div>
+        {p.receiptAck && <AckTag ack={p.receiptAck} />}
+      </div>
+    ),
+  },
+  {
+    title: 'Ended',
+    key: 'endedAt',
+    width: 210,
+    render: (_, p) =>
+      p.current ? (
+        <Tag color="green">Still has it</Tag>
+      ) : (
+        <div>
+          {formatDate(p.endedAt)}
+          <div className="muted">
+            {p.endAction === 'Transferred'
+              ? `transferred to ${holderText(p.transferredTo)}`
+              : `returned${p.returnCondition ? ` · ${p.returnCondition}` : ''}${p.statusAfter ? ` · now ${p.statusAfter}` : ''}`}
+            {p.endedBy?.name ? ` · by ${p.endedBy.name}` : ''}
+          </div>
+          {p.returnAck && <AckTag ack={p.returnAck} />}
+        </div>
+      ),
   },
 ];
 
 /**
- * Assets an employee holds: return any of them, assign more (one employee can hold many),
- * and see the full assignment history.
+ * Everything an employee holds and has held: assign more (one employee can hold many), transfer
+ * or return what they have, and see every period they had an asset.
  */
 export default function EmployeeAssetsDrawer({ employee, onClose, onChanged }) {
   const dispatch = useDispatch();
   const [state, setState] = useState({ loading: false, error: null, data: null });
   const [reloadKey, setReloadKey] = useState(0);
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [returning, setReturning] = useState(null);
+  const [handOver, setHandOver] = useState(null); // { mode, asset? }
 
   useEffect(() => {
     if (!employee?._id) return undefined;
@@ -61,29 +106,33 @@ export default function EmployeeAssetsDrawer({ employee, onClose, onChanged }) {
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
   const afterChange = useCallback(() => {
-    setAssignOpen(false);
-    setReturning(null);
+    setHandOver(null);
     reload();
     onChanged?.();
   }, [reload, onChanged]);
 
+  const person = state.data?.employee || employee;
   const current = state.data?.current || [];
-  const exited = (state.data?.employee || employee)?.status === 'Exited';
-  const returnTarget = useMemo(
-    () => (returning ? { ...returning, assignedTo: state.data?.employee || employee } : null),
-    [returning, state.data, employee]
-  );
+  const exited = person?.status === 'Exited';
+  // The assignment modal needs the asset's holder; here it's always this employee.
+  const withHolder = useCallback((a) => ({ ...a, assignedTo: person }), [person]);
+  const modalAsset = useMemo(() => (handOver?.asset ? withHolder(handOver.asset) : null), [handOver, withHolder]);
 
   return (
     <Drawer
       open={Boolean(employee)}
       onClose={onClose}
-      width={620}
+      width={680}
       destroyOnHidden
       title={employee ? `${employee.fullName} · ${employee.employeeId}` : ''}
       extra={
-        <Tooltip title={exited ? 'Exited employees cannot be assigned assets' : ''}>
-          <Button type="primary" icon={<PlusOutlined />} disabled={exited || !state.data} onClick={() => setAssignOpen(true)}>
+        <Tooltip title={exited ? 'Exited employees cannot be given assets' : ''}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            disabled={exited || !state.data}
+            onClick={() => setHandOver({ mode: 'assign', asset: null })}
+          >
             Assign asset
           </Button>
         </Tooltip>
@@ -96,16 +145,21 @@ export default function EmployeeAssetsDrawer({ employee, onClose, onChanged }) {
       ) : (
         <>
           <Typography.Title level={5} style={{ marginTop: 0 }}>
-            Currently assigned <span className="muted">({current.length})</span>
+            Currently holding <span className="muted">({current.length})</span>
           </Typography.Title>
           <List
             loading={state.loading}
             dataSource={current}
-            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No assets assigned" /> }}
+            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No assets right now" /> }}
             renderItem={(a) => (
               <List.Item
                 actions={[
-                  <Button key="return" size="small" icon={<RollbackOutlined />} onClick={() => setReturning(a)}>
+                  <Tooltip key="transfer" title="Hand it straight to another employee">
+                    <Button size="small" icon={<SwapOutlined />} onClick={() => setHandOver({ mode: 'transfer', asset: a })}>
+                      Transfer
+                    </Button>
+                  </Tooltip>,
+                  <Button key="return" size="small" icon={<RollbackOutlined />} onClick={() => setHandOver({ mode: 'return', asset: a })}>
                     Return
                   </Button>,
                 ]}
@@ -113,36 +167,52 @@ export default function EmployeeAssetsDrawer({ employee, onClose, onChanged }) {
                 <List.Item.Meta
                   avatar={<AssetImage assetId={a._id} image={a.image} size={44} />}
                   title={
-                    <Space size={6}>
+                    <Space size={6} wrap>
                       <span>{a.itemName}</span>
                       <StatusTag value={a.condition} />
+                      {isReturnOverdue(withHolder(a)) && <Tag color="red">Overdue</Tag>}
+                      {a.acknowledgement && (
+                        <Tag color={a.acknowledgement.status === 'Acknowledged' ? 'green' : 'gold'}>
+                          {a.acknowledgement.status === 'Acknowledged' ? 'Acknowledged' : 'Ack pending'}
+                        </Tag>
+                      )}
                     </Space>
                   }
-                  description={`${a.assetId} · ${a.category}${a.serialNumber ? ` · ${a.serialNumber}` : ''} · since ${formatDate(a.assignedAt)}`}
+                  description={
+                    <>
+                      {a.assetId} · {a.category}
+                      {a.serialNumber ? ` · ${a.serialNumber}` : ''}
+                      <br />
+                      Since {formatDate(a.assignedAt)}
+                      {a.expectedReturnAt ? ` · due back ${formatDate(a.expectedReturnAt)}` : ''}
+                    </>
+                  }
                 />
               </List.Item>
             )}
           />
 
-          <Divider orientation="left">History</Divider>
+          <Divider orientation="left">Assignment history</Divider>
           <Table
             size="small"
-            rowKey="_id"
+            rowKey="key"
             columns={HISTORY_COLUMNS}
             dataSource={state.data.history}
             pagination={state.data.history.length > 10 ? { pageSize: 10, size: 'small' } : false}
-            locale={{ emptyText: 'No assignment history' }}
+            locale={{ emptyText: 'Never held an asset' }}
+            scroll={{ x: 560 }}
           />
         </>
       )}
 
-      <AssignAssetModal
-        open={assignOpen}
-        employee={state.data?.employee || employee}
-        onClose={() => setAssignOpen(false)}
+      <AssignmentModal
+        open={Boolean(handOver)}
+        mode={handOver?.mode}
+        asset={modalAsset}
+        employee={handOver?.mode === 'assign' ? person : undefined}
+        onClose={() => setHandOver(null)}
         onDone={afterChange}
       />
-      <ReturnAssetModal open={Boolean(returning)} asset={returnTarget} onClose={() => setReturning(null)} onDone={afterChange} />
     </Drawer>
   );
 }
