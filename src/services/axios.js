@@ -77,13 +77,24 @@ export function getErrorMessage(error) {
   return error?.message || 'Something went wrong';
 }
 
-/** Normalised error object used as the rejection payload of every thunk. */
+/**
+ * Normalised error object used as the rejection payload of every thunk.
+ * `code`: the server's reason code when it gave one (e.g. "CONFLICT", "DB_UNAVAILABLE"), else
+ * "TIMEOUT" / "NETWORK" when no answer came back — i.e. we don't know whether the server acted.
+ */
 export function toApiError(error) {
+  const noAnswer = !error?.response && !isCancelled(error);
   return {
     message: getErrorMessage(error),
     status: error?.response?.status ?? null,
     fields: error?.response?.data?.fields ?? null,
+    code:
+      error?.response?.data?.code ??
+      (error?.code === 'ECONNABORTED' || error?.code === 'ETIMEDOUT' ? 'TIMEOUT' : noAnswer ? 'NETWORK' : null),
   };
 }
+
+/** True when the request may have reached the server but no answer came back (timeout / dropped connection). */
+export const isOutcomeUnknown = (apiError) => apiError?.code === 'TIMEOUT' || apiError?.code === 'NETWORK';
 
 export default api;

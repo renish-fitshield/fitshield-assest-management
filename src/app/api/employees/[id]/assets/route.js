@@ -1,12 +1,12 @@
 import { connectDB } from '@/lib/db';
 import { ok, fail, handleError, isValidId } from '@/lib/api';
-import { findAssignments } from '@/lib/assignments';
+import { employeeAssignmentHistory } from '@/lib/assignments';
 import Asset from '@/models/Asset';
 import Employee from '@/models/Employee';
 
 /**
  * GET /api/employees/:id/assets
- * → { employee, current: [assets assigned now], history: [all assignments, newest first] }
+ * → { employee, current: [assets they hold now], history: [every period they held an asset, newest first] }
  */
 export async function GET(_req, { params }) {
   try {
@@ -17,10 +17,13 @@ export async function GET(_req, { params }) {
     if (!employee) return fail('Employee not found', 404);
 
     const [current, history] = await Promise.all([
-      Asset.find({ assignedTo: id }, 'assetId itemName category brand modelName serialNumber condition assignedAt image')
+      Asset.find(
+        { assignedTo: id },
+        'assetId itemName category brand modelName serialNumber condition status quantity purchaseDate assignedAt expectedReturnAt acknowledgement image'
+      )
         .sort({ assignedAt: -1 })
         .lean(),
-      findAssignments({ employee: id }, { path: 'asset', select: 'assetId itemName category' }),
+      employeeAssignmentHistory(employee._id),
     ]);
 
     return ok({ employee, current, history });

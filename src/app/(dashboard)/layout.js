@@ -4,17 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { NavLink, navigate } from '@/lib/navigation';
 import { useDispatch, useSelector } from 'react-redux';
-import { App, Avatar, Button, Dropdown, Grid, Layout, Menu, Spin, Typography } from 'antd';
+import { App, Avatar, Button, Dropdown, Grid, Layout, Menu, Typography } from 'antd';
 import {
   AppstoreOutlined,
   DashboardOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  SwapOutlined,
+  TagsOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import Logo from '@/components/brand/Logo';
+import SplashScreen from '@/components/brand/SplashScreen';
 import ErrorState from '@/components/ErrorState';
 import { logout, restoreSession } from '@/store/authSlice';
 
@@ -23,6 +26,8 @@ const { Sider, Header, Content } = Layout;
 const NAV_ITEMS = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: <NavLink href="/dashboard">Dashboard</NavLink> },
   { key: '/assets', icon: <AppstoreOutlined />, label: <NavLink href="/assets">Assets</NavLink> },
+  { key: '/assignments', icon: <SwapOutlined />, label: <NavLink href="/assignments">Assignments</NavLink> },
+  { key: '/categories', icon: <TagsOutlined />, label: <NavLink href="/categories">Categories</NavLink> },
   { key: '/people', icon: <TeamOutlined />, label: <NavLink href="/people">People</NavLink> },
 ];
 
@@ -98,22 +103,20 @@ export default function DashboardLayout({ children }) {
     [user, loggingOut, handleLogout]
   );
 
+  const signedIn = status === 'authenticated';
+  // The sidebar and header are always on screen. Until the session is restored (and while signing out)
+  // the content area shows the Fitshield splash instead of the page.
+  let content = children;
   if (status === 'restoreFailed') {
-    return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 16 }}>
+    content = (
+      <div style={{ minHeight: 'calc(100vh - 112px)', display: 'grid', placeItems: 'center' }}>
         <ErrorState variant="page" title="Couldn't connect" message={error} onRetry={retryRestore} />
       </div>
     );
-  }
-
-  if (status !== 'authenticated' || loggingOut) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-        <Spin size="large" tip={loggingOut ? 'Signing out…' : 'Loading your workspace…'}>
-          <div style={{ width: 200, height: 60 }} />
-        </Spin>
-      </div>
-    );
+  } else if (loggingOut) {
+    content = <SplashScreen caption="Signing out…" />;
+  } else if (!signedIn) {
+    content = <SplashScreen />;
   }
 
   return (
@@ -142,6 +145,8 @@ export default function DashboardLayout({ children }) {
       <Layout>
         <Header
           style={{
+            // Its full height from the first paint (the UI library's own styles arrive a moment later).
+            height: 64,
             padding: '0 16px',
             display: 'flex',
             alignItems: 'center',
@@ -158,19 +163,21 @@ export default function DashboardLayout({ children }) {
             onClick={() => setCollapsed(!collapsed)}
             aria-label="Toggle sidebar"
           />
-          <Dropdown menu={userMenu} trigger={['click']} placement="bottomRight">
-            <Button type="text" style={{ height: 48, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Avatar size="small" icon={<UserOutlined />} style={{ background: 'var(--fs-green)' }} />
-              <span style={{ textAlign: 'left', lineHeight: 1.2 }}>
-                <Typography.Text strong style={{ display: 'block' }}>
-                  {user.name}
-                </Typography.Text>
-                <span className="muted">{user.role}</span>
-              </span>
-            </Button>
-          </Dropdown>
+          {user && (
+            <Dropdown menu={userMenu} trigger={['click']} placement="bottomRight">
+              <Button type="text" style={{ height: 48, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Avatar size="small" icon={<UserOutlined />} style={{ background: 'var(--fs-green)' }} />
+                <span style={{ textAlign: 'left', lineHeight: 1.2 }}>
+                  <Typography.Text strong style={{ display: 'block' }}>
+                    {user.name}
+                  </Typography.Text>
+                  <span className="muted">{user.role}</span>
+                </span>
+              </Button>
+            </Dropdown>
+          )}
         </Header>
-        <Content style={{ padding: 24, maxWidth: 1440, width: '100%', margin: '0 auto' }}>{children}</Content>
+        <Content style={{ padding: 24, maxWidth: 1440, width: '100%', margin: '0 auto' }}>{content}</Content>
       </Layout>
     </Layout>
   );

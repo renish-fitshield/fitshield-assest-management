@@ -1,17 +1,20 @@
+import mongoose from 'mongoose';
 import { ApiError, escapeRegex, isValidId } from '@/lib/api';
 import { enumValue } from '@/lib/listRequest';
 import {
-  ASSET_CATEGORIES,
   ASSET_STATUSES,
   ASSET_CONDITIONS,
   PURCHASE_TYPES,
   WARRANTY_STATUSES,
+  RETURN_DUE_FILTERS,
+  DUE_SOON_DAYS,
+  ACK_STATUSES,
 } from '@/lib/constants';
 
 /** Keys accepted in `body.filter` (plus `searchText`) by the asset list and the dashboard. */
 export const ASSET_FILTER_KEYS = [
   'assignedTo',
-  'category',
+  'categoryId',
   'status',
   'condition',
   'purchaseType',
@@ -20,6 +23,9 @@ export const ASSET_FILTER_KEYS = [
   'purchasedFrom',
   'purchasedTo',
   'assignable', // "true" → only assets that can be assigned now (Available, unassigned, quantity 1)
+  'returnDue', // "Overdue" | "Due in 7 days" — by the current holder's expected return date
+  'assigned', // "true" → only assets someone holds right now
+  'acknowledgement', // "Pending" | "Acknowledged" — whether the current holder has acknowledged receipt
 ];
 
 export const ASSET_SORT_FIELDS = [
@@ -36,6 +42,7 @@ export const ASSET_SORT_FIELDS = [
   'warrantyUntil',
   'location',
   'assignedAt',
+  'expectedReturnAt',
 ];
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -65,7 +72,6 @@ export function buildAssetFilter(filter) {
   const query = {};
 
   const enums = {
-    category: ASSET_CATEGORIES,
     status: ASSET_STATUSES,
     condition: ASSET_CONDITIONS,
     purchaseType: PURCHASE_TYPES,
@@ -82,11 +88,24 @@ export function buildAssetFilter(filter) {
     query.quantity = { $not: { $gt: 1 } }; // quantity 1 (or missing on old records)
   }
 
+  if (filter.assigned) {
+    if (filter.assigned !== 'true') throw new ApiError('Invalid filter.assigned: expected "true"', 400);
+    query.assignedTo = { $ne: null };
+  }
+  const ack = enumValue(filter, 'acknowledgement', ACK_STATUSES);
+  if (ack) query['acknowledgement.status'] = ack; // only set while assigned
+
   if (filter.location) query.location = new RegExp(`^${escapeRegex(filter.location)}$`, 'i');
 
   if (filter.assignedTo) {
     if (!isValidId(filter.assignedTo)) throw new ApiError('Invalid filter.assignedTo: expected an employee id', 400);
     query.assignedTo = filter.assignedTo;
+  }
+
+  if (filter.categoryId) {
+    if (!isValidId(filter.categoryId)) throw new ApiError('Invalid filter.categoryId: expected a category id', 400);
+    // An ObjectId, not the string: the dashboard runs this filter in an aggregation, which doesn't cast.
+    query.categoryId = new mongoose.Types.ObjectId(filter.categoryId);
   }
 
   const today = startOfToday();
@@ -99,6 +118,17 @@ export function buildAssetFilter(filter) {
       break;
     case 'Not Applicable':
       query.warrantyUntil = null; // matches null and missing
+      break;
+    default:
+  }
+
+  // Only assigned assets have an expected return date (it's cleared on return).
+  switch (enumValue(filter, 'returnDue', RETURN_DUE_FILTERS)) {
+    case 'Overdue':
+      query.expectedReturnAt = { $lt: today };
+      break;
+    case 'Due in 7 days':
+      query.expectedReturnAt = { $gte: today, $lt: new Date(today.getTime() + (DUE_SOON_DAYS + 1) * 86400000) };
       break;
     default:
   }

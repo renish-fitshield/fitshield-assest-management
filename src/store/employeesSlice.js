@@ -22,7 +22,7 @@ export const createEmployee = apiThunk('employees/create', (payload) => api.post
 export const updateEmployee = apiThunk('employees/update', ({ id, data }) => api.put(`/employees/${id}`, data));
 export const deleteEmployee = apiThunk('employees/delete', (id) => api.delete(`/employees/${id}`));
 
-export const EMPLOYEE_FILTER_KEYS = ['department', 'status', 'workType'];
+export const EMPLOYEE_FILTER_KEYS = ['department', 'status', 'workType', 'employmentType'];
 
 export const EMPLOYEE_DEFAULT_QUERY = {
   page: 1,
@@ -33,6 +33,7 @@ export const EMPLOYEE_DEFAULT_QUERY = {
   department: null,
   status: null,
   workType: null,
+  employmentType: null,
 };
 
 const employeesSlice = createSlice({

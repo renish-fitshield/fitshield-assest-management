@@ -9,10 +9,9 @@ npm-debug.log*
 next-env.d.ts
 
 # Local secrets (the template stays tracked)
-.env
 .env*.local
-.env.*
 !.env.example
 
 # Vercel CLI project link
 .vercel
+config.bat
