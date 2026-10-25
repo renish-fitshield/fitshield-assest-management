@@ -74,7 +74,7 @@ const actorSchema = new mongoose.Schema(
 const holderSchema = new mongoose.Schema(
   {
     employee: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
-    employeeId: { type: String }, // EMP-0001
+    employeeId: { type: String }, // FSEMP-ENG-0001
     fullName: { type: String, required: true },
     department: { type: String },
   },

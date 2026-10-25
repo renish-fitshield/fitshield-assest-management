@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   App,
@@ -30,6 +30,7 @@ import { toDayjs } from '@/lib/format';
 import { applyServerErrors, disableFutureDates, maxLen, requiredText, trimStart, validateOrScroll } from '@/lib/forms';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
+import ResetFormOnOpen from '@/components/ResetFormOnOpen';
 import AssetImageField from '@/components/assets/AssetImageField';
 import AssetBillField from '@/components/assets/AssetBillField';
 import { getErrorMessage } from '@/services/axios';
@@ -219,12 +220,6 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
   const waitingForRecord = isEdit && (record.loading || (!record.asset && !record.error));
   const showForm = open && !record.error && !waitingForRecord;
 
-  // The form instance outlives each open, and a remounted <Form> merges its initialValues *under* the
-  // values it still holds — so reset once it's showing, or the previously edited asset's data leaks in.
-  useLayoutEffect(() => {
-    if (showForm) form.resetFields();
-  }, [showForm, initialValues, form]);
-
   let body;
   if (record.error) {
     body = (
@@ -249,6 +244,7 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
         form={form}
         layout="vertical"
         preserve={false}
+        clearOnDestroy
         initialValues={initialValues}
         disabled={busy}
         style={{ marginTop: 16 }}
@@ -489,6 +485,8 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
             </Form.Item>
           </Col>
         </Row>
+        {/* Last child: starts every Add / Edit from this record's values, never the previous one's. */}
+        <ResetFormOnOpen form={form} open={showForm} values={initialValues} />
       </Form>
     );
   }
