@@ -4,12 +4,17 @@ import authReducer, { tokenRefreshed, sessionExpired, logout } from './authSlice
 import assetsReducer from './assetsSlice';
 import employeesReducer from './employeesSlice';
 import dashboardReducer from './dashboardSlice';
+import categoriesReducer from './categoriesSlice';
+import { currentAssignmentsReducer, handOverLogReducer } from './assignmentsSlice';
 
 const appReducer = combineReducers({
   auth: authReducer,
   dashboard: dashboardReducer,
   assets: assetsReducer,
   employees: employeesReducer,
+  categories: categoriesReducer,
+  currentAssignments: currentAssignmentsReducer,
+  handOverLog: handOverLogReducer,
 });
 
 // Drop all cached data when the session ends.

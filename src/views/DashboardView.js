@@ -4,7 +4,7 @@ import { memo, useCallback, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { NavLink, navigate } from '@/lib/navigation';
 import dayjs from 'dayjs';
-import { Button, Card, DatePicker, Empty, Input, Select, Skeleton, Spin, Table, Typography } from 'antd';
+import { Button, Card, DatePicker, Empty, Input, Select, Skeleton, Spin, Table, Tag, Typography } from 'antd';
 import {
   AppstoreOutlined,
   CheckCircleOutlined,
@@ -17,20 +17,21 @@ import {
   WalletOutlined,
 } from '@ant-design/icons';
 import {
-  ASSET_CATEGORIES,
   ASSET_STATUSES,
   ASSET_CONDITIONS,
   WARRANTY_STATUSES,
   PURCHASE_TYPES,
 } from '@/lib/constants';
-import { formatCurrency, formatDate, formatDateTime, toDayjs } from '@/lib/format';
+import { formatCompactCurrency, formatCurrency, formatDate, formatDateTime, toDayjs } from '@/lib/format';
 import { toFilterPayload } from '@/store/listPayload';
 import StatusTag from '@/components/StatusTag';
+import CompactCurrency from '@/components/CompactCurrency';
 import ErrorState from '@/components/ErrorState';
 import BarList from '@/components/dashboard/BarList';
 import MonthlyChart from '@/components/dashboard/MonthlyChart';
 import useAbortableFetch from '@/hooks/useAbortableFetch';
 import useDebouncedSearch from '@/hooks/useDebouncedSearch';
+import useCategories from '@/hooks/useCategories';
 import {
   fetchDashboard,
   setDashboardFilters,
@@ -40,7 +41,6 @@ import {
 import { setAssetQuery } from '@/store/assetsSlice';
 
 const toOptions = (list) => list.map((v) => ({ label: v, value: v }));
-const CATEGORY_OPTIONS = toOptions(ASSET_CATEGORIES);
 const STATUS_OPTIONS = toOptions(ASSET_STATUSES);
 const CONDITION_OPTIONS = toOptions(ASSET_CONDITIONS);
 const WARRANTY_OPTIONS = toOptions(WARRANTY_STATUSES);
@@ -59,14 +59,14 @@ const assetCell = (v, r) => (
 const smallEmpty = (text) => <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} />;
 const pct = (part, whole) => (whole ? `${Math.round((part / whole) * 100)}% of assets` : '—');
 
-const Kpi = memo(function Kpi({ icon, label, value, hint }) {
+const Kpi = memo(function Kpi({ icon, label, value, title, hint }) {
   return (
     <Card size="small" styles={{ body: { padding: 16 } }}>
       <div className="kpi">
         <span className="kpi-icon">{icon}</span>
         <div style={{ minWidth: 0 }}>
           <div className="kpi-label">{label}</div>
-          <div className="kpi-value">{value}</div>
+          <div className="kpi-value" title={title}>{value}</div>
           {hint && <div className="kpi-hint">{hint}</div>}
         </div>
       </div>
@@ -91,7 +91,57 @@ const EXPIRING_COLUMNS = [
 const RECENT_COLUMNS = [
   { title: 'Asset', dataIndex: 'itemName', render: assetCell },
   { title: 'Status', dataIndex: 'status', render: (v) => <StatusTag value={v} /> },
-  { title: 'Cost', dataIndex: 'cost', align: 'right', render: formatCurrency },
+  {
+    title: 'Cost',
+    dataIndex: 'cost',
+    align: 'right',
+    render: (v) => <CompactCurrency value={v} />,
+  },
+];
+
+const person = (h) => (h ? h.fullName : '—');
+const HAND_OVER_TEXT = {
+  Assigned: (e) => `→ ${person(e.to)}`,
+  Transferred: (e) => `${person(e.from)} → ${person(e.to)}`,
+  Returned: (e) => `${person(e.from)} → returned`,
+};
+const HAND_OVER_COLOR = { Assigned: 'green', Transferred: 'blue', Returned: 'orange' };
+
+const ASSIGNMENT_COLUMNS = [
+  { title: 'Asset', dataIndex: 'itemName', render: assetCell },
+  {
+    title: 'Hand-over',
+    key: 'event',
+    render: (_, r) => (
+      <span>
+        <Tag color={HAND_OVER_COLOR[r.event.action]}>{r.event.action}</Tag>
+        {HAND_OVER_TEXT[r.event.action](r.event)}
+      </span>
+    ),
+  },
+  {
+    title: 'Date',
+    key: 'date',
+    render: (_, r) => (
+      <span>
+        {formatDate(r.event.date)} <span className="muted">by {r.event.by?.name || '—'}</span>
+      </span>
+    ),
+  },
+];
+
+const OVERDUE_COLUMNS = [
+  { title: 'Asset', dataIndex: 'itemName', render: assetCell },
+  { title: 'With', dataIndex: 'assignedTo', render: (h) => person(h) },
+  {
+    title: 'Due',
+    dataIndex: 'expectedReturnAt',
+    render: (v) => (
+      <span>
+        {formatDate(v)} <span className="overdue-text">({dayjs().startOf('day').diff(toDayjs(v), 'day')}d late)</span>
+      </span>
+    ),
+  },
 ];
 
 export default function DashboardView() {
@@ -134,10 +184,11 @@ export default function DashboardView() {
         setAssetQuery({
           page: 1,
           searchText: filters.searchText,
-          category: filters.category,
+          categoryId: filters.categoryId,
           status: filters.status,
           condition: filters.condition,
           warrantyStatus: filters.warrantyStatus,
+          returnDue: null,
           ...extra,
         })
       );
@@ -150,13 +201,14 @@ export default function DashboardView() {
   const categoryItems = useMemo(
     () =>
       (data?.byCategory || []).map((c) => ({
-        key: c.category,
+        key: c.categoryId ?? 'uncategorized',
+        categoryId: c.categoryId,
         label: c.category,
         count: c.count,
-        active: filters.category === c.category,
-        tooltip: `${c.count} assets · ${formatCurrency(c.value)}`,
+        active: Boolean(c.categoryId) && filters.categoryId === c.categoryId,
+        tooltip: `${c.count} assets · ${formatCompactCurrency(c.value)}`,
       })),
-    [data?.byCategory, filters.category]
+    [data?.byCategory, filters.categoryId]
   );
   const statusItems = useMemo(
     () =>
@@ -165,7 +217,7 @@ export default function DashboardView() {
         label: <StatusTag value={s.status} />,
         count: s.count,
         active: filters.status === s.status,
-        tooltip: `${s.count} assets · ${formatCurrency(s.value)}`,
+        tooltip: `${s.count} assets · ${formatCompactCurrency(s.value)}`,
       })),
     [data?.byStatus, filters.status]
   );
@@ -212,8 +264,12 @@ export default function DashboardView() {
     [data?.people.byDepartment]
   );
   const locationOptions = useMemo(() => toOptions(data?.filterOptions.locations || []), [data?.filterOptions.locations]);
+  const { options: categoryOptions, loading: categoriesLoading } = useCategories();
 
-  const onCategory = useCallback((item) => toggleFilter('category', item.key), [toggleFilter]);
+  const onCategory = useCallback(
+    (item) => item.categoryId && toggleFilter('categoryId', item.categoryId),
+    [toggleFilter]
+  );
   const onStatus = useCallback((item) => toggleFilter('status', item.key), [toggleFilter]);
   const onWarranty = useCallback((item) => toggleFilter('warrantyStatus', item.key), [toggleFilter]);
   const onCondition = useCallback((item) => toggleFilter('condition', item.key), [toggleFilter]);
@@ -254,8 +310,26 @@ export default function DashboardView() {
 
         <div className="kpi-grid">
           <Kpi icon={<AppstoreOutlined />} label="Total assets" value={kpis.totalAssets} hint={activeFilterCount ? 'Matching filters' : 'All assets'} />
-          <Kpi icon={<WalletOutlined />} label="Total value" value={formatCurrency(kpis.totalValue).replace(/\.00$/, '')} hint="Purchase cost" />
-          <Kpi icon={<SwapOutlined />} label="Assigned" value={kpis.assigned} hint={pct(kpis.assigned, kpis.totalAssets)} />
+          <Kpi icon={<WalletOutlined />} label="Total value" value={formatCompactCurrency(kpis.totalValue)} title={formatCurrency(kpis.totalValue).replace(/\.00$/, '')} hint="Purchase cost" />
+          <Kpi
+            icon={<SwapOutlined />}
+            label="Assigned"
+            value={kpis.assigned}
+            hint={
+              kpis.overdueReturns || kpis.pendingAcknowledgements ? (
+                <NavLink href="/assignments" className="overdue-text">
+                  {[
+                    kpis.overdueReturns ? `${kpis.overdueReturns} overdue` : null,
+                    kpis.pendingAcknowledgements ? `${kpis.pendingAcknowledgements} awaiting acknowledgement` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </NavLink>
+              ) : (
+                pct(kpis.assigned, kpis.totalAssets)
+              )
+            }
+          />
           <Kpi icon={<CheckCircleOutlined />} label="Available" value={kpis.available} hint={pct(kpis.available, kpis.totalAssets)} />
           <Kpi icon={<ToolOutlined />} label="Under repair" value={kpis.underRepair} hint={`${kpis.retiredOrLost} retired or lost`} />
           <Kpi icon={<ClockCircleOutlined />} label="Warranty expiring" value={kpis.expiringSoon} hint={`In the next ${data.expiringDays} days`} />
@@ -263,7 +337,7 @@ export default function DashboardView() {
 
         <div className="dash-grid">
           <Card className="span-7" title="Assets by category" extra={<span className="muted">Click a category to filter</span>}>
-            <BarList items={categoryItems} hideZero={!filters.category} emptyText="No assets match these filters" onSelect={onCategory} />
+            <BarList items={categoryItems} hideZero={!filters.categoryId}emptyText="No assets match these filters" onSelect={onCategory} />
           </Card>
           <div className="span-5" style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
             <Card title="Asset status">
@@ -324,6 +398,41 @@ export default function DashboardView() {
           </Card>
         </div>
 
+        <div className="dash-grid">
+          <Card
+            className="span-7"
+            title="Assignment activity"
+            extra={<span className="muted">Latest hand-overs</span>}
+          >
+            <Table
+              className="mini-table"
+              size="small"
+              rowKey={(r) => r.event._id}
+              pagination={false}
+              dataSource={data.recentAssignments}
+              locale={{ emptyText: smallEmpty('No assignments yet') }}
+              scroll={{ x: 520 }}
+              columns={ASSIGNMENT_COLUMNS}
+            />
+          </Card>
+          <Card
+            className="span-5"
+            title={`Overdue returns${kpis.overdueReturns ? ` (${kpis.overdueReturns})` : ''}`}
+            extra={<Button type="link" size="small" onClick={() => openInAssets({ returnDue: 'Overdue' })}>View all</Button>}
+          >
+            <Table
+              className="mini-table"
+              size="small"
+              rowKey="_id"
+              pagination={false}
+              dataSource={data.overdueReturns}
+              locale={{ emptyText: smallEmpty('Nothing overdue') }}
+              scroll={{ x: 380 }}
+              columns={OVERDUE_COLUMNS}
+            />
+          </Card>
+        </div>
+
         <div className="section-title">
           <TeamOutlined /> People overview <span className="muted">· all employees</span>
         </div>
@@ -373,7 +482,7 @@ export default function DashboardView() {
             onChange={(e) => setSearchText(e.target.value)}
             onSearch={submitSearch}
           />
-          <Select placeholder="Category" allowClear showSearch value={filters.category} options={CATEGORY_OPTIONS} onChange={(v) => setFilter({ category: v ?? null })} />
+          <Select placeholder="Category" allowClear showSearch optionFilterProp="label" value={filters.categoryId} options={categoryOptions} loading={categoriesLoading} onChange={(v) => setFilter({ categoryId: v ?? null })} />
           <Select placeholder="Status" allowClear value={filters.status} options={STATUS_OPTIONS} onChange={(v) => setFilter({ status: v ?? null })} />
           <Select placeholder="Condition" allowClear value={filters.condition} options={CONDITION_OPTIONS} onChange={(v) => setFilter({ condition: v ?? null })} />
           <Select placeholder="Warranty" allowClear value={filters.warrantyStatus} options={WARRANTY_OPTIONS} onChange={(v) => setFilter({ warrantyStatus: v ?? null })} />

@@ -559,3 +559,162 @@ body {
 .mini-table .ant-table-cell {
   white-space: nowrap;
 }
+
+/* ---------- Acknowledgement page (public, from the email) ---------- */
+.ack-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  background: radial-gradient(rgba(16, 24, 40, 0.05) 1px, transparent 1px) 0 0 / 22px 22px, var(--fs-bg);
+}
+
+.ack-card {
+  width: 100%;
+  max-width: 620px;
+  background: var(--fs-card);
+  border-radius: 1.5rem;
+  padding: 32px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 40px 90px -30px rgba(16, 24, 40, 0.35);
+}
+
+.ack-brand {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 20px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--fs-line);
+}
+
+.ack-contact {
+  margin: 24px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--fs-line);
+  text-align: center;
+  color: var(--fs-muted);
+  font-size: 13px;
+}
+
+.ack-foot {
+  margin: 16px 0 0;
+  color: var(--fs-muted-light);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .ack-card {
+    padding: 20px 16px;
+    border-radius: 1.25rem;
+  }
+}
+
+/* ---------- Assignments page ---------- */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 1100px) {
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stat-active {
+  outline: 2px solid var(--fs-green);
+}
+
+.kpi-icon.warn {
+  background: #fff7e6;
+  color: #d48806;
+}
+
+.kpi-icon.danger {
+  background: #fff1f0;
+  color: #cf1322;
+}
+
+/* ---------- Assignment ---------- */
+.assign-summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  margin: 12px 0 16px;
+  border: 1px solid var(--fs-line);
+  border-radius: 12px;
+  background: var(--fs-bg);
+}
+
+.overdue-text {
+  color: #cf1322;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* History timelines (asset drawer) */
+.history-entry-title {
+  font-weight: 500;
+}
+
+.history-meta {
+  color: var(--fs-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.history-changes {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--fs-bg);
+  font-size: 13px;
+  display: grid;
+  gap: 4px;
+}
+
+.history-changes .field {
+  color: var(--fs-muted);
+}
+
+.history-changes .before {
+  color: var(--fs-muted);
+  text-decoration: line-through;
+  word-break: break-word;
+}
+
+.history-changes .after {
+  word-break: break-word;
+}
+
+.ack-lines {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--fs-line);
+  display: grid;
+  gap: 4px;
+}
+
+.ack-line {
+  font-size: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.ack-line .ant-tag {
+  margin-inline-end: 0;
+}
+
+.history-note {
+  font-size: 13px;
+  margin-top: 4px;
+  white-space: pre-wrap;
+}

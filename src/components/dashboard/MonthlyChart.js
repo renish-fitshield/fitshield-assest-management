@@ -3,7 +3,7 @@
 import { memo, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
 import { Segmented, Tooltip, theme } from 'antd';
-import { formatCurrency } from '@/lib/format';
+import { formatCompactCurrency, formatCurrency } from '@/lib/format';
 
 const compactInr = new Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 1 });
 
@@ -24,7 +24,7 @@ function MonthlyChart({ data }) {
     const top = niceMax(Math.max(0, ...values));
     return { max: top, ticks: [top, top / 2, 0], empty: values.every((v) => v === 0) };
   }, [data, measure]);
-  const fmt = (v) => (measure === 'value' ? `₹${compactInr.format(v)}` : compactInr.format(v));
+  const fmt = (v) => (measure === 'value' ? formatCompactCurrency(v) : compactInr.format(v));
 
   return (
     <div>
@@ -62,7 +62,7 @@ function MonthlyChart({ data }) {
                 title={
                   <div>
                     <div style={{ fontWeight: 600 }}>{label}</div>
-                    <div>Spend: {formatCurrency(d.value)}</div>
+                    <div>Spend: {formatCompactCurrency(d.value)}</div>
                     <div>Assets bought: {d.count}</div>
                   </div>
                 }

@@ -5,11 +5,15 @@ import { Button, Card, Result } from 'antd';
 import DashboardView from '@/views/DashboardView';
 import AssetsView from '@/views/AssetsView';
 import PeopleView from '@/views/PeopleView';
+import CategoriesView from '@/views/CategoriesView';
+import AssignmentsView from '@/views/AssignmentsView';
 import { NavLink } from '@/lib/navigation';
 
 const VIEWS = {
   '/dashboard': DashboardView,
   '/assets': AssetsView,
+  '/assignments': AssignmentsView,
+  '/categories': CategoriesView,
   '/people': PeopleView,
 };
 

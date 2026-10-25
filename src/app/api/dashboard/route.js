@@ -3,7 +3,6 @@ import { ok, handleError, readJson } from '@/lib/api';
 import { parseFilter } from '@/lib/listRequest';
 import { buildAssetFilter, ASSET_FILTER_KEYS } from '@/lib/assetFilters';
 import {
-  ASSET_CATEGORIES,
   ASSET_STATUSES,
   ASSET_CONDITIONS,
   WARRANTY_STATUSES,
@@ -12,6 +11,7 @@ import {
 } from '@/lib/constants';
 import Asset from '@/models/Asset';
 import Employee from '@/models/Employee';
+import Category from '@/models/Category';
 
 const EXPIRING_DAYS = 30;
 const MONTHS = 12;
@@ -23,6 +23,26 @@ const fillBuckets = (keys, rows, field) => {
   const map = Object.fromEntries(rows.map((r) => [r._id, r]));
   return keys.map((key) => ({ [field]: key, count: map[key]?.count || 0, value: map[key]?.value || 0 }));
 };
+
+/** Every category (A→Z, including empty ones), plus "Uncategorized" for assets without a valid category. */
+function categoryBuckets(categories, rows) {
+  const map = new Map(rows.map((r) => [String(r._id), r]));
+  const buckets = categories.map((c) => {
+    const row = map.get(String(c._id));
+    map.delete(String(c._id));
+    return { categoryId: c._id, category: c.name, count: row?.count || 0, value: row?.value || 0 };
+  });
+  const rest = [...map.values()];
+  if (rest.length) {
+    buckets.push({
+      categoryId: null,
+      category: 'Uncategorized',
+      count: rest.reduce((n, r) => n + r.count, 0),
+      value: rest.reduce((n, r) => n + r.value, 0),
+    });
+  }
+  return buckets;
+}
 
 function monthWindow(purchasedTo) {
   const end = purchasedTo ? new Date(purchasedTo) : new Date();
@@ -39,7 +59,7 @@ function monthWindow(purchasedTo) {
 
 /**
  * POST /api/dashboard
- * Body: { filter: { searchText, category, status, condition, purchaseType, location, warrantyStatus,
+ * Body: { filter: { searchText, categoryId, status, condition, purchaseType, location, warrantyStatus,
  *                   purchasedFrom, purchasedTo } } — same filter keys as POST /api/assets/list.
  * All asset metrics respect the filters; the people overview covers all employees.
  */
@@ -55,13 +75,15 @@ export async function POST(req) {
     const { start, endOfWindow, months } = monthWindow(applied.purchasedTo);
     const expiringFilter = { $and: [filter, { warrantyUntil: { $gte: today, $lte: expiringUntil } }] };
 
-    const [[facets], expiringSoon, recentAssets, [people], locations] = await Promise.all([
+    const overdueFilter = { $and: [filter, { expectedReturnAt: { $lt: today } }] };
+
+    const [[facets], expiringSoon, recentAssets, [people], locations, categories, overdueReturns, overdueCount, pendingAckCount, recentAssignments] = await Promise.all([
       Asset.aggregate([
         { $match: filter },
         {
           $facet: {
             totals: [{ $group: { _id: null, count: { $sum: 1 }, value: sumCost } }],
-            byCategory: [{ $group: { _id: '$category', count: { $sum: 1 }, value: sumCost } }],
+            byCategory: [{ $group: { _id: '$categoryId', count: { $sum: 1 }, value: sumCost } }],
             byStatus: [{ $group: { _id: '$status', count: { $sum: 1 }, value: sumCost } }],
             byCondition: [{ $group: { _id: '$condition', count: { $sum: 1 } } }],
             byWarranty: [
@@ -136,6 +158,23 @@ export async function POST(req) {
         },
       ]),
       Asset.distinct('location', { location: { $nin: [null, ''] } }),
+      Category.find({}, 'name').collation({ locale: 'en', strength: 2 }).sort({ name: 1 }).lean(),
+      // Assigned assets past their expected return date, most overdue first.
+      Asset.find(overdueFilter, 'assetId itemName assignedTo assignedAt expectedReturnAt')
+        .populate('assignedTo', 'employeeId fullName')
+        .sort({ expectedReturnAt: 1 })
+        .limit(6)
+        .lean(),
+      Asset.countDocuments(overdueFilter),
+      Asset.countDocuments({ $and: [filter, { 'acknowledgement.status': 'Pending' }] }),
+      // Latest hand-overs across the matching assets (only each asset's last few are unwound).
+      Asset.aggregate([
+        { $match: filter },
+        { $project: { assetId: 1, itemName: 1, event: { $slice: ['$assignmentHistory', -6] } } },
+        { $unwind: '$event' },
+        { $sort: { 'event.at': -1 } },
+        { $limit: 8 },
+      ]),
     ]);
 
     const totals = facets.totals[0] || { count: 0, value: 0 };
@@ -152,8 +191,10 @@ export async function POST(req) {
         underRepair: statusCount('Under Repair'),
         retiredOrLost: statusCount('Retired') + statusCount('Lost'),
         expiringSoon: facets.expiringCount[0]?.count || 0,
+        overdueReturns: overdueCount,
+        pendingAcknowledgements: pendingAckCount,
       },
-      byCategory: fillBuckets(ASSET_CATEGORIES, facets.byCategory, 'category'),
+      byCategory: categoryBuckets(categories, facets.byCategory),
       byStatus,
       byCondition: fillBuckets(ASSET_CONDITIONS, facets.byCondition, 'condition'),
       byWarranty: fillBuckets(WARRANTY_STATUSES, facets.byWarranty, 'warrantyStatus'),
@@ -165,6 +206,8 @@ export async function POST(req) {
       })),
       expiringSoon,
       recentAssets,
+      overdueReturns,
+      recentAssignments,
       people: {
         total: people.total[0]?.count || 0,
         byStatus: fillBuckets(EMPLOYEE_STATUSES, people.byStatus, 'status'),

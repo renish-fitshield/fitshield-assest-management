@@ -8,7 +8,7 @@ export const fetchDashboard = apiThunk('dashboard/fetch', (body, { signal }) =>
 );
 
 export const DASHBOARD_FILTER_KEYS = [
-  'category',
+  'categoryId',
   'status',
   'condition',
   'warrantyStatus',
@@ -20,7 +20,7 @@ export const DASHBOARD_FILTER_KEYS = [
 
 export const EMPTY_DASHBOARD_FILTERS = {
   searchText: '',
-  category: null,
+  categoryId: null,
   status: null,
   condition: null,
   warrantyStatus: null,

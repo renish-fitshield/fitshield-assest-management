@@ -3,11 +3,11 @@ import { ok, handleError, readJson } from '@/lib/api';
 import { parseListRequest, runPagedQuery, listResponse } from '@/lib/listRequest';
 import { buildAssetFilter, ASSET_FILTER_KEYS, ASSET_SORT_FIELDS } from '@/lib/assetFilters';
 import { HOLDER_FIELDS } from '@/lib/assignments';
-import Asset from '@/models/Asset';
+import Asset, { WITHOUT_HISTORY } from '@/models/Asset';
 
 /**
  * POST /api/assets/list
- * Body: { filter: { searchText, assignedTo (employee id), category, status, condition, purchaseType, location, warrantyStatus,
+ * Body: { filter: { searchText, assignedTo (employee id), categoryId, status, condition, purchaseType, location, warrantyStatus,
  *                   purchasedFrom, purchasedTo }, pagination_info: { page, perPageData }, sort: { sortBy, data } }
  */
 export async function POST(req) {
@@ -21,6 +21,7 @@ export async function POST(req) {
     await connectDB();
     const result = await runPagedQuery(Asset, mongoFilter, request, (skip, limit) =>
       Asset.find(mongoFilter)
+        .select(WITHOUT_HISTORY)
         .sort(request.mongoSort)
         .skip(skip)
         .limit(limit)

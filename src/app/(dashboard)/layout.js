@@ -11,6 +11,8 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  SwapOutlined,
+  TagsOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
@@ -23,6 +25,8 @@ const { Sider, Header, Content } = Layout;
 const NAV_ITEMS = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: <NavLink href="/dashboard">Dashboard</NavLink> },
   { key: '/assets', icon: <AppstoreOutlined />, label: <NavLink href="/assets">Assets</NavLink> },
+  { key: '/assignments', icon: <SwapOutlined />, label: <NavLink href="/assignments">Assignments</NavLink> },
+  { key: '/categories', icon: <TagsOutlined />, label: <NavLink href="/categories">Categories</NavLink> },
   { key: '/people', icon: <TeamOutlined />, label: <NavLink href="/people">People</NavLink> },
 ];
 

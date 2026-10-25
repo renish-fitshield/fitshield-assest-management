@@ -13,12 +13,35 @@ export const deleteAsset = apiThunk('assets/delete', (id) => api.delete(`/assets
 /** Brand suggestions: built-in list + brands users have added (→ { items: [name] }). */
 export const fetchBrandOptions = apiThunk('assets/brands', (_, { signal }) => api.get('/brands', { signal }));
 
-// Assignment: one asset → one employee. Body: { employeeId, assignedAt?, notes? }
-export const assignAsset = apiThunk('assets/assign', ({ id, data }) => api.post(`/assets/${id}/assign`, data));
+// Hand-overs also send email, which can be slow; wait longer than the default before giving up,
+// so a hand-over that went through isn't reported as failed. (The server allows up to 60s.)
+const HAND_OVER_TIMEOUT = { timeout: 75_000 };
+
+// Assignment: one asset → one employee at a time. Each call records history + activity on the asset.
+// Body: { employeeId, assignedAt?, condition?, expectedReturnAt?, notes? }
+export const assignAsset = apiThunk('assets/assign', ({ id, data }) => api.post(`/assets/${id}/assign`, data, HAND_OVER_TIMEOUT));
+// Straight to another employee. Body: { employeeId, transferredAt?, condition?, expectedReturnAt?, notes? }
+export const transferAsset = apiThunk('assets/transfer', ({ id, data }) =>
+  api.post(`/assets/${id}/transfer`, data, HAND_OVER_TIMEOUT)
+);
 // Body: { returnedAt?, condition?, statusAfter?, notes? }
-export const returnAsset = apiThunk('assets/return', ({ id, data }) => api.post(`/assets/${id}/return`, data));
-export const fetchAssetAssignments = apiThunk('assets/assignments', (id, { signal }) =>
-  api.get(`/assets/${id}/assignments`, { signal })
+export const returnAsset = apiThunk('assets/return', ({ id, data }) => api.post(`/assets/${id}/return`, data, HAND_OVER_TIMEOUT));
+/** → { assignmentHistory, activities, createdAt } — newest first. */
+export const fetchAssetHistory = apiThunk('assets/history', (id, { signal }) =>
+  api.get(`/assets/${id}/history`, { signal })
+);
+/** Several assets to one employee. Body: { employeeId, assetIds, assignedAt?, expectedReturnAt?, notes? } */
+export const assignManyAssets = apiThunk('assets/assignMany', (data) => api.post('/assignments', data, HAND_OVER_TIMEOUT));
+/** Send a hand-over's acknowledgement email again. → { email, message } */
+export const resendAckEmail = apiThunk('assets/resendAckEmail', ({ id, eventId, side }) =>
+  api.post(`/assets/${id}/acknowledgement-email`, { eventId, side }, HAND_OVER_TIMEOUT)
+);
+/** Every hand-over across assets. Body: { filter, pagination_info } */
+export const fetchAssignmentLog = apiThunk('assets/assignmentLog', (body, { signal }) =>
+  api.post('/assignments/log', body, { signal })
+);
+export const fetchAssignmentSummary = apiThunk('assets/assignmentSummary', (_, { signal }) =>
+  api.get('/assignments/summary', { signal })
 );
 /** Assets that can be assigned (Available, quantity 1) for the "assign to employee" picker. */
 export const searchAssignableAssets = apiThunk('assets/searchAssignable', (searchText, { signal }) =>
@@ -41,7 +64,7 @@ export const uploadAssetImage = apiThunk('assets/uploadImage', ({ id, file }) =>
 });
 export const deleteAssetImage = apiThunk('assets/deleteImage', (id) => api.delete(`/assets/${id}/image`));
 
-export const ASSET_FILTER_KEYS = ['assignedTo', 'category', 'status', 'condition', 'warrantyStatus'];
+export const ASSET_FILTER_KEYS = ['assignedTo', 'categoryId', 'status', 'condition', 'warrantyStatus', 'returnDue'];
 
 export const ASSET_DEFAULT_QUERY = {
   page: 1,
@@ -50,10 +73,11 @@ export const ASSET_DEFAULT_QUERY = {
   sortData: SORT_DATA.DEFAULT,
   searchText: '',
   assignedTo: null,
-  category: null,
+  categoryId: null,
   status: null,
   condition: null,
   warrantyStatus: null,
+  returnDue: null,
 };
 
 const assetsSlice = createSlice({
@@ -69,7 +93,7 @@ const assetsSlice = createSlice({
   },
   extraReducers: (builder) => {
     addListCases(builder, fetchAssets);
-    addMutationCases(builder, [createAsset, updateAsset, deleteAsset, assignAsset, returnAsset]);
+    addMutationCases(builder, [createAsset, updateAsset, deleteAsset, assignAsset, transferAsset, returnAsset, assignManyAssets]);
   },
 });
 
