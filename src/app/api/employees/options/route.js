@@ -6,7 +6,7 @@ import Employee from '@/models/Employee';
 export async function GET() {
   try {
     await connectDB();
-    const items = await Employee.find({}, 'employeeId fullName status').sort({ fullName: 1 }).lean();
+    const items = await Employee.find({}, 'employeeId fullName status employmentType').sort({ fullName: 1 }).lean();
     return ok({ items });
   } catch (err) {
     return handleError(err);

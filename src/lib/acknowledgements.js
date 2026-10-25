@@ -136,42 +136,99 @@ export async function resendAckEmail({ assetId, eventId, side, origin }) {
 
 // ---- the employee's side (public, via the emailed link)
 
-const invalidLink = () => new ApiError('This acknowledgement link is not valid.', 400, undefined, 'LINK_INVALID');
+const linkError = (message, status, code) => new ApiError(message, status, undefined, code);
+const invalidLink = () =>
+  linkError('This acknowledgement link is not valid. Please use the button in the latest email you received.', 400, 'LINK_INVALID');
 
+/**
+ * Verifies the link's signature and returns its payload plus `expired`.
+ * An expired link is still read (jose checks the signature before the expiry, so its payload is genuine):
+ * that lets an already-finished acknowledgement be shown instead of a bare "expired".
+ */
 async function readToken(token) {
   if (typeof token !== 'string' || token.length < 20 || token.length > 2000) throw invalidLink();
-  let p;
+  let payload;
+  let expired = false;
   try {
-    p = await verifyAckToken(token);
+    payload = await verifyAckToken(token);
   } catch (err) {
-    if (err?.code === 'ERR_JWT_EXPIRED') {
-      throw new ApiError('This acknowledgement link has expired. Please ask for a new one.', 410, undefined, 'LINK_EXPIRED');
+    if (err?.code === 'ERR_JWT_EXPIRED' && err.payload?.type === 'ack') {
+      payload = err.payload;
+      expired = true;
+    } else if (String(err?.code || '').startsWith('ERR_J') || err?.message === 'Wrong token type') {
+      // jose's own errors (bad signature, malformed, wrong claims) and our type check mean a bad link…
+      throw invalidLink();
+    } else {
+      // …anything else (e.g. the signing secret missing) is a server problem, not the employee's.
+      console.error('[ack] could not verify an acknowledgement link:', err);
+      throw linkError('Acknowledgements are temporarily unavailable. Please try again later.', 500, 'ACK_UNAVAILABLE');
     }
-    // jose's own errors (bad signature, malformed, wrong claims) and our type check mean a bad link…
-    if (String(err?.code || '').startsWith('ERR_J') || err?.message === 'Wrong token type') throw invalidLink();
-    // …anything else (e.g. the signing secret missing) is a server problem, not the employee's.
-    console.error('[ack] could not verify an acknowledgement link:', err);
-    throw new ApiError('Acknowledgements are temporarily unavailable. Please try again later.', 500, undefined, 'ACK_UNAVAILABLE');
   }
-  if (!isValidId(p.aid) || !isValidId(p.eid) || !isValidId(p.emp) || !SIDES.includes(p.side)) throw invalidLink();
-  return p;
+  if (!isValidId(payload.aid) || !isValidId(payload.eid) || !isValidId(payload.emp) || !SIDES.includes(payload.side)) {
+    throw invalidLink();
+  }
+  return { ...payload, expired };
 }
 
-/** What the link is for, and whether it's done — shown on the acknowledgement page. */
-export async function getAcknowledgement(token) {
+/**
+ * Checks a link, in this order, before anything is shown or recorded:
+ *   1. the link is genuine (signed by this app, not altered)
+ *   2. the asset exists                       (by the asset id in the link)
+ *   3. the employee exists                    (by the employee id in the link)
+ *   4. the hand-over is on that asset and names that employee on that side
+ *   5. the acknowledgement status for that asset + employee + hand-over (Pending until acknowledged)
+ * A pending acknowledgement behind an expired link can't be completed (410); a finished one is still shown.
+ * Each failure throws an ApiError with a stable `code`, so the page can explain it.
+ */
+async function resolveLink(token) {
   const p = await readToken(token);
-  const found = await loadHandOver(p.aid, p.eid);
-  if (!found) throw new ApiError('This asset hand-over no longer exists.', 404, undefined, 'HANDOVER_NOT_FOUND');
-  const { asset, event } = found;
-  const holder = event[p.side];
-  if (!holder || String(holder.employee) !== p.emp) throw invalidLink();
+  const [asset, employee] = await Promise.all([
+    Asset.findById(p.aid, ASSET_FIELDS_FOR_EMAIL).select({ assignmentHistory: { $elemMatch: { _id: p.eid } } }).lean(),
+    Employee.findById(p.emp, 'fullName employeeId').lean(),
+  ]);
+  if (!asset) {
+    throw linkError("This asset no longer exists in the system, so it can't be acknowledged.", 404, 'ASSET_NOT_FOUND');
+  }
+  if (!employee) {
+    throw linkError("Your employee record no longer exists in the system, so this asset can't be acknowledged.", 404, 'EMPLOYEE_NOT_FOUND');
+  }
+  const event = asset.assignmentHistory?.[0];
+  if (!event) {
+    throw linkError("This hand-over is no longer on record, so there's nothing to acknowledge.", 404, 'HANDOVER_NOT_FOUND');
+  }
+  if (!event[p.side] || String(event[p.side].employee) !== p.emp) throw invalidLink();
+
   const ack = event[ACK_FIELD[p.side]] || {};
+  const status = ack.status === 'Acknowledged' ? 'Acknowledged' : 'Pending';
+  if (p.expired && status === 'Pending') {
+    throw linkError('This acknowledgement link has expired. Please ask the asset team to send you a new one.', 410, 'LINK_EXPIRED');
+  }
+  return { p, asset, event, employee, status, acknowledgedAt: ack.acknowledgedAt || null };
+}
+
+/** The status-check view: what the page needs to decide between "acknowledge" and "done". */
+function statusView({ p, status, acknowledgedAt }) {
+  return {
+    status,
+    acknowledgedAt,
+    canAcknowledge: status === 'Pending',
+    linkExpired: p.expired,
+    linkExpiresAt: p.exp ? new Date(p.exp * 1000).toISOString() : null,
+    // Every check passed (a failed one is an error response instead).
+    checks: { link: true, asset: true, employee: true, handOver: true },
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+/** The full view shown on the acknowledgement page: the status plus what is being acknowledged. */
+function detailsView(resolved) {
+  const { p, asset, event, employee } = resolved;
   const counterpart = p.side === 'to' ? event.from : event.to;
   return {
+    ...statusView(resolved),
     kind: p.side === 'to' ? 'receipt' : 'return',
-    status: ack.status || 'Pending',
-    acknowledgedAt: ack.acknowledgedAt || null,
-    employee: { fullName: holder.fullName, employeeId: holder.employeeId },
+    // The live employee record (names may have been corrected since the hand-over).
+    employee: { fullName: employee.fullName, employeeId: employee.employeeId },
     asset: {
       assetId: asset.assetId,
       itemName: asset.itemName,
@@ -191,35 +248,52 @@ export async function getAcknowledgement(token) {
     },
     company: COMPANY_NAME,
     contact: QUERY_CONTACT_NAME,
-    _token: p,
   };
 }
 
+/** GET …/:token — every check, then what the link is for and whether it's done. */
+export async function getAcknowledgement(token) {
+  return detailsView(await resolveLink(token));
+}
+
+/** GET …/:token/status — every check, then just the status (cheap; the page re-checks with it). */
+export async function getAcknowledgementStatus(token) {
+  return statusView(await resolveLink(token));
+}
+
 /**
- * Records the acknowledgement. Idempotent: a second click (or two at once) just reports it's done.
- * Matches on asset id + hand-over id + employee id + side, and only while still Pending.
+ * Records the acknowledgement. Every check in resolveLink runs again first, then the write itself only
+ * matches while the asset still has that hand-over, naming that employee, not yet acknowledged — so a
+ * double click, two tabs, or the asset being deleted meanwhile can't record it twice or wrongly.
+ * Returns the status read back from the database after the write.
  */
 export async function acknowledge(token, { ip, userAgent }) {
-  const { _token: p, ...details } = await getAcknowledgement(token);
-  if (details.status === 'Acknowledged') return { ...details, alreadyAcknowledged: true };
+  const resolved = await resolveLink(token);
+  if (resolved.status === 'Acknowledged') return { ...detailsView(resolved), alreadyAcknowledged: true };
 
+  const { p, employee } = resolved;
   const field = ACK_FIELD[p.side];
   const eventId = new mongoose.Types.ObjectId(p.eid);
   const now = new Date();
-  const match = { _id: eventId, [`${p.side}.employee`]: new mongoose.Types.ObjectId(p.emp), [`${field}.status`]: 'Pending' };
+  const match = {
+    _id: eventId,
+    [`${p.side}.employee`]: new mongoose.Types.ObjectId(p.emp),
+    [`${field}.status`]: { $ne: 'Acknowledged' },
+  };
   const set = {
     [`assignmentHistory.$.${field}.status`]: 'Acknowledged',
     [`assignmentHistory.$.${field}.acknowledgedAt`]: now,
     [`assignmentHistory.$.${field}.ip`]: ip?.slice(0, 100),
     [`assignmentHistory.$.${field}.userAgent`]: userAgent?.slice(0, 300),
   };
-  const who = holderLabel(details.employee);
+  const who = holderLabel(employee);
   const log = activity('Acknowledged', { user: null, name: who }, {
     note: p.side === 'to' ? `${who} acknowledged receiving it` : `${who} acknowledged handing it back`,
   });
 
   let res = { modifiedCount: 0 };
-  // Receipt by the current holder also updates the asset's own acknowledgement status (same write).
+  // Receipt by the current holder also updates the asset's own acknowledgement status (same write),
+  // which is what the asset list, Assignments page and dashboard show.
   if (p.side === 'to') {
     res = await Asset.updateOne(
       { _id: p.aid, 'acknowledgement.eventId': eventId, assignmentHistory: { $elemMatch: match } },
@@ -229,12 +303,21 @@ export async function acknowledge(token, { ip, userAgent }) {
   if (!res.modifiedCount) {
     res = await Asset.updateOne({ _id: p.aid, assignmentHistory: { $elemMatch: match } }, { $set: set, $push: { activities: log } });
   }
-  if (!res.modifiedCount) {
-    // Someone (e.g. a double click) acknowledged it a moment ago.
-    const { _token, ...now2 } = await getAcknowledgement(token);
-    return { ...now2, alreadyAcknowledged: true };
+
+  // Read it back: confirms the write, and reports a concurrent acknowledgement (or a deleted asset) correctly.
+  const after = await resolveLink(token);
+  if (after.status !== 'Acknowledged') {
+    console.error(`[ack] acknowledgement for asset ${p.aid}, hand-over ${p.eid}, side ${p.side} was not recorded`);
+    throw linkError("Your acknowledgement couldn't be saved. Please try again.", 503, 'ACK_NOT_SAVED');
   }
-  return { ...details, status: 'Acknowledged', acknowledgedAt: now };
+  return { ...detailsView(after), alreadyAcknowledged: !res.modifiedCount };
+}
+
+/** The page's view of a failure — the same { status, code, message } the API returns. */
+export function ackErrorView(err) {
+  if (err instanceof ApiError) return { status: err.status, code: err.code || null, message: err.message };
+  console.error('[ack] could not load an acknowledgement:', err);
+  return { status: 503, code: 'ACK_UNAVAILABLE', message: "We couldn't load this right now. Please try again in a moment." };
 }
 
 /** " Acknowledgement email sent to a@b." / " The email to a@b couldn't be sent: …" — appended to API messages. */
@@ -252,6 +335,3 @@ export function emailSummary(emails = []) {
 
 /** True when an email result needs the admin's attention (failed, or only went to the test inbox). */
 export const emailNeedsAttention = (e) => e.status !== 'Sent' || e.testOnly;
-
-/** The public view of an acknowledgement (no token internals). */
-export const publicView = ({ _token, ...view }) => view;

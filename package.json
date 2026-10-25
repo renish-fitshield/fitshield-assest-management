@@ -13,7 +13,9 @@
     "migrate:quantity-bill": "node --env-file=.env.local scripts/migrate-quantity-bill.mjs",
     "migrate:categories": "node --env-file=.env.local scripts/migrate-categories.mjs",
     "migrate:assignment-history": "node --env-file=.env.local scripts/migrate-assignment-history.mjs",
-    "mail:test": "node --no-warnings --env-file=.env.local scripts/test-mail.mjs"
+    "mail:test": "node --no-warnings --env-file=.env.local scripts/test-mail.mjs",
+    "migrate:employment-type": "node --env-file=.env.local scripts/migrate-employment-type.mjs",
+    "migrate:employee-ids": "node --env-file=.env.local scripts/migrate-employee-ids.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",
@@ -30,6 +32,7 @@
     "nodemailer": "^7.0.13",
     "react": "^19.1.10",
     "react-dom": "^19.1.10",
-    "react-redux": "^9.3.0"
+    "react-redux": "^9.3.0",
+    "recharts": "3.10.1"
   }
 }

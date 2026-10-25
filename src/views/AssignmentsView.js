@@ -18,11 +18,13 @@ import { ACK_STATUSES, ASSIGNMENT_ACTIONS, RETURN_DUE_FILTERS, isReturnOverdue }
 import { formatDate, formatDateTime } from '@/lib/format';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
+import DataLoader from '@/components/DataLoader';
 import AssetImage from '@/components/assets/AssetImage';
 import AssignmentModal, { reportResend } from '@/components/assets/AssignmentModal';
 import AssetDetailsDrawer from '@/components/assets/AssetDetailsDrawer';
 import { AckLine } from '@/components/assets/AssetHistory';
 import useServerTable, { PAGE_SIZE_OPTIONS } from '@/hooks/useServerTable';
+import useRefreshOnFocus from '@/hooks/useRefreshOnFocus';
 import useCategories from '@/hooks/useCategories';
 import { fetchAssetById, fetchAssignmentSummary, resendAckEmail } from '@/store/assetsSlice';
 import { fetchEmployeeOptions } from '@/store/employeesSlice';
@@ -219,34 +221,35 @@ function CurrentTab({ reloadKey, employeeOptions, onView, onHandOver, onResend, 
         )}
       </div>
       {error && <ErrorState message={error} onRetry={refetch} retrying={loading} />}
-      <Table
-        rowKey="_id"
-        columns={columns}
-        dataSource={items}
-        loading={{ spinning: loading, tip: 'Loading assignments…' }}
-        scroll={{ x: 1030 }}
-        onChange={onTableChange}
-        showSorterTooltip={false}
-        pagination={{
-          current: query.page,
-          pageSize: query.perPageData,
-          total: totalCount,
-          showSizeChanger: true,
-          pageSizeOptions: PAGE_SIZE_OPTIONS,
-          showTotal: (t) => `${t} assigned asset${t === 1 ? '' : 's'}`,
-          disabled: loading,
-        }}
-        locale={{
-          emptyText: !loaded ? ' ' : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={activeFilterCount ? 'No assignments match these filters' : 'No assets are assigned right now'} />
-          ),
-        }}
-      />
+      <DataLoader ready={loaded || Boolean(error)} loading={loading} dataKey={JSON.stringify(query)}>
+        <Table
+          rowKey="_id"
+          columns={columns}
+          dataSource={items}
+          scroll={{ x: 1030 }}
+          onChange={onTableChange}
+          showSorterTooltip={false}
+          pagination={{
+            current: query.page,
+            pageSize: query.perPageData,
+            total: totalCount,
+            showSizeChanger: true,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showTotal: (t) => `${t} assigned asset${t === 1 ? '' : 's'}`,
+            disabled: loading,
+          }}
+          locale={{
+            emptyText: !loaded ? ' ' : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={activeFilterCount ? 'No assignments match these filters' : 'No assets are assigned right now'} />
+            ),
+          }}
+        />
+      </DataLoader>
     </>
   );
 }
 
-function LogTab({ reloadKey, employeeOptions, onView, onResend, resending }) {
+function LogTab({ reloadKey, employeeOptions, onView }) {
   const dispatch = useDispatch();
   const { items, totalCount, query, loading, loaded, error } = useSelector((s) => s.handOverLog);
   const { refetch, setFilter, onTableChange, activeFilterCount, searchText, setSearchText, submitSearch } = useServerTable({
@@ -308,28 +311,17 @@ function LogTab({ reloadKey, employeeOptions, onView, onResend, resending }) {
         render: (_, r) => {
           const e = r.event;
           if (!e.toAck && !e.fromAck) return <span className="muted">—</span>;
+          // Status only: the log is a record. Resending is on the "Currently assigned" tab and in the asset's history.
           return (
             <div style={{ display: 'grid', gap: 2 }}>
-              <AckLine
-                compact
-                label={e.from?.fullName}
-                ack={e.fromAck}
-                onResend={() => onResend(r.asset._id, e._id, 'from')}
-                resending={resending === `${e._id}:from`}
-              />
-              <AckLine
-                compact
-                label={e.to?.fullName}
-                ack={e.toAck}
-                onResend={() => onResend(r.asset._id, e._id, 'to')}
-                resending={resending === `${e._id}:to`}
-              />
+              <AckLine compact label={e.from?.fullName} ack={e.fromAck} />
+              <AckLine compact label={e.to?.fullName} ack={e.toAck} />
             </div>
           );
         },
       },
     ],
-    [onView, onResend, resending]
+    [onView]
   );
 
   return (
@@ -363,28 +355,29 @@ function LogTab({ reloadKey, employeeOptions, onView, onResend, resending }) {
         )}
       </div>
       {error && <ErrorState message={error} onRetry={refetch} retrying={loading} />}
-      <Table
-        rowKey="_id"
-        columns={columns}
-        dataSource={items}
-        loading={{ spinning: loading, tip: 'Loading hand-overs…' }}
-        scroll={{ x: 1100 }}
-        onChange={onTableChange}
-        pagination={{
-          current: query.page,
-          pageSize: query.perPageData,
-          total: totalCount,
-          showSizeChanger: true,
-          pageSizeOptions: PAGE_SIZE_OPTIONS,
-          showTotal: (t) => `${t} hand-over${t === 1 ? '' : 's'}`,
-          disabled: loading,
-        }}
-        locale={{
-          emptyText: !loaded ? ' ' : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={activeFilterCount ? 'No hand-overs match these filters' : 'No hand-overs yet'} />
-          ),
-        }}
-      />
+      <DataLoader ready={loaded || Boolean(error)} loading={loading} dataKey={JSON.stringify(query)}>
+        <Table
+          rowKey="_id"
+          columns={columns}
+          dataSource={items}
+          scroll={{ x: 1100 }}
+          onChange={onTableChange}
+          pagination={{
+            current: query.page,
+            pageSize: query.perPageData,
+            total: totalCount,
+            showSizeChanger: true,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showTotal: (t) => `${t} hand-over${t === 1 ? '' : 's'}`,
+            disabled: loading,
+          }}
+          locale={{
+            emptyText: !loaded ? ' ' : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={activeFilterCount ? 'No hand-overs match these filters' : 'No hand-overs yet'} />
+            ),
+          }}
+        />
+      </DataLoader>
     </>
   );
 }
@@ -427,6 +420,8 @@ export default function AssignmentsView() {
   }, [dispatch, reloadKey]);
 
   const reloadAll = useCallback(() => setReloadKey((k) => k + 1), []);
+  // Coming back to this tab reloads the counts and lists, so new acknowledgements show up.
+  useRefreshOnFocus(reloadAll);
   const openHandOver = useCallback((mode, asset) => setHandOver({ mode, asset }), []);
   // `updated` is null after a bulk assign, an unknown outcome (timeout) or stale data: close an open
   // drawer rather than leave it showing outdated details.
@@ -475,6 +470,9 @@ export default function AssignmentsView() {
     setTab('current');
   };
   const currentQuery = useSelector((s) => s.currentAssignments.query);
+  // First load: the splash shows until the counts and the "Currently assigned" list are in (or failed).
+  const currentReady = useSelector((s) => s.currentAssignments.loaded || Boolean(s.currentAssignments.error));
+  const firstLoad = (!summary && !summaryError) || !currentReady;
 
   return (
     <>
@@ -492,80 +490,83 @@ export default function AssignmentsView() {
         </Button>
       </div>
 
-      <div className="stat-grid">
-        <StatCard
-          icon={<SwapOutlined />}
-          label="Assigned now"
-          value={summary?.assigned}
-          hint={summary ? `with ${summary.holders} employee${summary.holders === 1 ? '' : 's'}` : null}
-          onClick={() => setCurrentFilter({})}
-          active={tab === 'current' && !currentQuery.acknowledgement && !currentQuery.returnDue}
-        />
-        <StatCard
-          icon={<SafetyCertificateOutlined />}
-          tone="warn"
-          label="Awaiting acknowledgement"
-          value={summary?.pendingAcknowledgement}
-          hint={summary?.pendingReturnAcknowledgement ? `+ ${summary.pendingReturnAcknowledgement} return${summary.pendingReturnAcknowledgement === 1 ? '' : 's'} not yet acknowledged` : 'receipts not yet confirmed'}
-          onClick={() => setCurrentFilter({ acknowledgement: 'Pending' })}
-          active={tab === 'current' && currentQuery.acknowledgement === 'Pending'}
-        />
-        <StatCard
-          icon={<WarningOutlined />}
-          tone="danger"
-          label="Overdue returns"
-          value={summary?.overdue}
-          hint="past their expected return date"
-          onClick={() => setCurrentFilter({ returnDue: 'Overdue' })}
-          active={tab === 'current' && currentQuery.returnDue === 'Overdue'}
-        />
-        <StatCard
-          icon={<ClockCircleOutlined />}
-          label="Due in 7 days"
-          value={summary?.dueSoon}
-          hint="expected back this week"
-          onClick={() => setCurrentFilter({ returnDue: 'Due in 7 days' })}
-          active={tab === 'current' && currentQuery.returnDue === 'Due in 7 days'}
-        />
-      </div>
-
-      {summaryError && (
-        <div style={{ marginBottom: 16 }}>
-          <ErrorState message={`Couldn't load the counts: ${summaryError}`} onRetry={reloadAll} />
+      {/* First load: one splash for the counts and the list together (later loads: each tab's own). */}
+      <DataLoader ready={!firstLoad} loading={false}>
+        <div className="stat-grid">
+          <StatCard
+            icon={<SwapOutlined />}
+            label="Assigned now"
+            value={summary?.assigned}
+            hint={summary ? `with ${summary.holders} employee${summary.holders === 1 ? '' : 's'}` : null}
+            onClick={() => setCurrentFilter({})}
+            active={tab === 'current' && !currentQuery.acknowledgement && !currentQuery.returnDue}
+          />
+          <StatCard
+            icon={<SafetyCertificateOutlined />}
+            tone="warn"
+            label="Awaiting acknowledgement"
+            value={summary?.pendingAcknowledgement}
+            hint={summary?.pendingReturnAcknowledgement ? `+ ${summary.pendingReturnAcknowledgement} return${summary.pendingReturnAcknowledgement === 1 ? '' : 's'} not yet acknowledged` : 'receipts not yet confirmed'}
+            onClick={() => setCurrentFilter({ acknowledgement: 'Pending' })}
+            active={tab === 'current' && currentQuery.acknowledgement === 'Pending'}
+          />
+          <StatCard
+            icon={<WarningOutlined />}
+            tone="danger"
+            label="Overdue returns"
+            value={summary?.overdue}
+            hint="past their expected return date"
+            onClick={() => setCurrentFilter({ returnDue: 'Overdue' })}
+            active={tab === 'current' && currentQuery.returnDue === 'Overdue'}
+          />
+          <StatCard
+            icon={<ClockCircleOutlined />}
+            label="Due in 7 days"
+            value={summary?.dueSoon}
+            hint="expected back this week"
+            onClick={() => setCurrentFilter({ returnDue: 'Due in 7 days' })}
+            active={tab === 'current' && currentQuery.returnDue === 'Due in 7 days'}
+          />
         </div>
-      )}
 
-      <Card>
-        <Tabs
-          activeKey={tab}
-          onChange={setTab}
-          items={[
-            {
-              key: 'current',
-              label: 'Currently assigned',
-              children:
-                tab === 'current' ? (
-                  <CurrentTab
-                    reloadKey={reloadKey}
-                    employeeOptions={employeeOptions}
-                    onView={view}
-                    onHandOver={openHandOver}
-                    onResend={resend}
-                    resending={resending}
-                  />
-                ) : null,
-            },
-            {
-              key: 'log',
-              label: 'Hand-over log',
-              children:
-                tab === 'log' ? (
-                  <LogTab reloadKey={reloadKey} employeeOptions={employeeOptions} onView={view} onResend={resend} resending={resending} />
-                ) : null,
-            },
-          ]}
-        />
-      </Card>
+        {summaryError && (
+          <div style={{ marginBottom: 16 }}>
+            <ErrorState message={`Couldn't load the counts: ${summaryError}`} onRetry={reloadAll} />
+          </div>
+        )}
+
+        <Card>
+          <Tabs
+            activeKey={tab}
+            onChange={setTab}
+            items={[
+              {
+                key: 'current',
+                label: 'Currently assigned',
+                children:
+                  tab === 'current' ? (
+                    <CurrentTab
+                      reloadKey={reloadKey}
+                      employeeOptions={employeeOptions}
+                      onView={view}
+                      onHandOver={openHandOver}
+                      onResend={resend}
+                      resending={resending}
+                    />
+                  ) : null,
+              },
+              {
+                key: 'log',
+                label: 'Hand-over log',
+                children:
+                  tab === 'log' ? (
+                    <LogTab reloadKey={reloadKey} employeeOptions={employeeOptions} onView={view} />
+                  ) : null,
+              },
+            ]}
+          />
+        </Card>
+      </DataLoader>
 
       <AssignmentModal
         open={Boolean(handOver)}

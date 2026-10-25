@@ -26,6 +26,13 @@ export const formatCompactCurrency = (value) => {
   return `${n < 0 ? '-' : ''}₹${Math.abs(short)}${unit.suffix}`;
 };
 
+const count = new Intl.NumberFormat('en-IN');
+const compactCount = new Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 1 });
+export const formatCount = (value) => count.format(value || 0);
+// 1,200 → 1.2K, 1,20,000 → 1.2L (axis ticks and tight spaces)
+export const formatCompactCount = (value) => compactCount.format(value || 0);
+export const formatPercent = (ratio) => `${Math.round((ratio || 0) * 100)}%`;
+
 export const STATUS_COLORS = {
   // asset status
   Available: 'green',
@@ -49,4 +56,7 @@ export const STATUS_COLORS = {
   // acknowledgement
   Pending: 'gold',
   Acknowledged: 'green',
+  // employment type
+  'Full-Time': 'blue',
+  Intern: 'purple',
 };

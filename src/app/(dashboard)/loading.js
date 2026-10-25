@@ -1,12 +1,6 @@
-'use client';
-
-import { Card, Skeleton } from 'antd';
+import SplashScreen from '@/components/brand/SplashScreen';
 
 /** Shown during route transitions between dashboard pages. */
 export default function DashboardLoading() {
-  return (
-    <Card>
-      <Skeleton active title={{ width: 220 }} paragraph={{ rows: 10 }} />
-    </Card>
-  );
+  return <SplashScreen />;
 }
