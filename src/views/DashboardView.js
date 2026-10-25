@@ -1,36 +1,54 @@
 'use client';
 
-import { memo, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { NavLink, navigate } from '@/lib/navigation';
 import dayjs from 'dayjs';
-import { Button, Card, DatePicker, Empty, Input, Select, Skeleton, Spin, Table, Tag, Typography } from 'antd';
+import { Avatar, Button, Card, Segmented, Tag, Typography } from 'antd';
 import {
-  AppstoreOutlined,
   CheckCircleOutlined,
-  ClearOutlined,
   ClockCircleOutlined,
+  CloseCircleOutlined,
+  ExclamationCircleOutlined,
+  MailOutlined,
+  MinusCircleOutlined,
   ReloadOutlined,
-  SwapOutlined,
-  TeamOutlined,
+  SafetyCertificateOutlined,
   ToolOutlined,
-  WalletOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
+import { ASSET_STATUSES, ASSIGNMENT_ACTIONS } from '@/lib/constants';
 import {
-  ASSET_STATUSES,
-  ASSET_CONDITIONS,
-  WARRANTY_STATUSES,
-  PURCHASE_TYPES,
-} from '@/lib/constants';
-import { formatCompactCurrency, formatCurrency, formatDate, formatDateTime, toDayjs } from '@/lib/format';
+  formatCompactCount,
+  formatCompactCurrency,
+  formatCount,
+  formatDate,
+  formatDateTime,
+  formatPercent,
+  toDayjs,
+} from '@/lib/format';
+import { NavLink, navigate } from '@/lib/navigation';
 import { toFilterPayload } from '@/store/listPayload';
 import StatusTag from '@/components/StatusTag';
 import CompactCurrency from '@/components/CompactCurrency';
 import ErrorState from '@/components/ErrorState';
-import BarList from '@/components/dashboard/BarList';
-import MonthlyChart from '@/components/dashboard/MonthlyChart';
+import DataLoader from '@/components/DataLoader';
+import ChartCard from '@/components/dashboard/ChartCard';
+import { ColumnChart, DonutChart, HBarChart, preloadCharts } from '@/components/dashboard/charts';
+import ShareBar from '@/components/dashboard/ShareBar';
+import DashList from '@/components/dashboard/DashList';
+import DashboardFilters from '@/components/dashboard/DashboardFilters';
+import { AttentionCard, HeroCard, UsageCard } from '@/components/dashboard/OverviewCards';
+import {
+  AGE_COLORS,
+  ASSET_STATUS_COLORS,
+  CONDITION_COLORS,
+  HAND_OVER_COLORS,
+  SERIES,
+  STATUS_TONES,
+  WARRANTY_COLORS,
+} from '@/components/dashboard/chartTheme';
 import useAbortableFetch from '@/hooks/useAbortableFetch';
-import useDebouncedSearch from '@/hooks/useDebouncedSearch';
+import useRefreshOnFocus from '@/hooks/useRefreshOnFocus';
 import useCategories from '@/hooks/useCategories';
 import {
   fetchDashboard,
@@ -39,118 +57,114 @@ import {
   DASHBOARD_FILTER_KEYS,
 } from '@/store/dashboardSlice';
 import { setAssetQuery } from '@/store/assetsSlice';
+import { setCurrentQuery } from '@/store/assignmentsSlice';
 
-const toOptions = (list) => list.map((v) => ({ label: v, value: v }));
-const STATUS_OPTIONS = toOptions(ASSET_STATUSES);
-const CONDITION_OPTIONS = toOptions(ASSET_CONDITIONS);
-const WARRANTY_OPTIONS = toOptions(WARRANTY_STATUSES);
-const PURCHASE_TYPE_OPTIONS = toOptions(PURCHASE_TYPES);
-const RANGE_PRESETS = [
-  { label: 'Last 30 days', value: [dayjs().subtract(30, 'day'), dayjs()] },
-  { label: 'This year', value: [dayjs().startOf('year'), dayjs()] },
-  { label: 'Last 12 months', value: [dayjs().subtract(12, 'month'), dayjs()] },
-];
-const disableFuture = (d) => d && d.isAfter(dayjs().endOf('day'));
-const assetCell = (v, r) => (
-  <span>
-    {v} <span className="muted">{r.assetId}</span>
-  </span>
-);
-const smallEmpty = (text) => <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} />;
-const pct = (part, whole) => (whole ? `${Math.round((part / whole) * 100)}% of assets` : '—');
+/* ---------- chart series & table views ---------- */
 
-const Kpi = memo(function Kpi({ icon, label, value, title, hint }) {
-  return (
-    <Card size="small" styles={{ body: { padding: 16 } }}>
-      <div className="kpi">
-        <span className="kpi-icon">{icon}</span>
-        <div style={{ minWidth: 0 }}>
-          <div className="kpi-label">{label}</div>
-          <div className="kpi-value" title={title}>{value}</div>
-          {hint && <div className="kpi-hint">{hint}</div>}
-        </div>
-      </div>
-    </Card>
-  );
-});
+const num = (title, dataIndex, render = formatCount) => ({ title, dataIndex, align: 'right', className: 'num', render });
+const money = (title = 'Value', dataIndex = 'value') => num(title, dataIndex, (v) => <CompactCurrency value={v} />);
 
-const EXPIRING_COLUMNS = [
-  { title: 'Asset', dataIndex: 'itemName', render: assetCell },
-  { title: 'Category', dataIndex: 'category' },
-  {
-    title: 'Expires',
-    dataIndex: 'warrantyUntil',
-    render: (v) => (
-      <span>
-        {formatDate(v)} <span className="muted">({toDayjs(v).diff(dayjs().startOf('day'), 'day')}d)</span>
-      </span>
-    ),
-  },
-];
-
-const RECENT_COLUMNS = [
-  { title: 'Asset', dataIndex: 'itemName', render: assetCell },
-  { title: 'Status', dataIndex: 'status', render: (v) => <StatusTag value={v} /> },
-  {
-    title: 'Cost',
-    dataIndex: 'cost',
-    align: 'right',
-    render: (v) => <CompactCurrency value={v} />,
-  },
-];
-
-const person = (h) => (h ? h.fullName : '—');
-const HAND_OVER_TEXT = {
-  Assigned: (e) => `→ ${person(e.to)}`,
-  Transferred: (e) => `${person(e.from)} → ${person(e.to)}`,
-  Returned: (e) => `${person(e.from)} → returned`,
+const SPEND_SERIES = {
+  spend: [{ key: 'spend', name: 'Spend', color: SERIES[0] }],
+  assets: [{ key: 'assets', name: 'Assets bought', color: SERIES[0] }],
 };
-const HAND_OVER_COLOR = { Assigned: 'green', Transferred: 'blue', Returned: 'orange' };
-
-const ASSIGNMENT_COLUMNS = [
-  { title: 'Asset', dataIndex: 'itemName', render: assetCell },
-  {
-    title: 'Hand-over',
-    key: 'event',
-    render: (_, r) => (
-      <span>
-        <Tag color={HAND_OVER_COLOR[r.event.action]}>{r.event.action}</Tag>
-        {HAND_OVER_TEXT[r.event.action](r.event)}
-      </span>
-    ),
-  },
-  {
-    title: 'Date',
-    key: 'date',
-    render: (_, r) => (
-      <span>
-        {formatDate(r.event.date)} <span className="muted">by {r.event.by?.name || '—'}</span>
-      </span>
-    ),
-  },
+const SPEND_METRICS = [
+  { value: 'spend', label: 'Spend' },
+  { value: 'assets', label: 'Assets' },
+];
+const CATEGORY_METRICS = [
+  { value: 'count', label: 'By status' },
+  { value: 'value', label: 'By value' },
+];
+const HAND_OVER_SERIES = ASSIGNMENT_ACTIONS.map((a) => ({ key: a, name: a, color: HAND_OVER_COLORS[a] }));
+const VALUE_SERIES = [{ key: 'value', name: 'Value', color: SERIES[0] }];
+const COUNT_SERIES = [{ key: 'count', name: 'Assets', color: SERIES[0] }];
+const DEPARTMENT_SERIES = [
+  { key: 'employees', name: 'Employees', color: SERIES[0] },
+  { key: 'assets', name: 'Assets held', color: SERIES[1] },
 ];
 
-const OVERDUE_COLUMNS = [
-  { title: 'Asset', dataIndex: 'itemName', render: assetCell },
-  { title: 'With', dataIndex: 'assignedTo', render: (h) => person(h) },
-  {
-    title: 'Due',
-    dataIndex: 'expectedReturnAt',
-    render: (v) => (
-      <span>
-        {formatDate(v)} <span className="overdue-text">({dayjs().startOf('day').diff(toDayjs(v), 'day')}d late)</span>
-      </span>
-    ),
-  },
+const MONTHLY_COLUMNS = [{ title: 'Month', dataIndex: 'label' }, num('Assets', 'assets'), num('Units', 'units'), money('Spend', 'spend')];
+const STATUS_COLUMNS = [
+  { title: 'Status', dataIndex: 'name', render: (v) => <StatusTag value={v} /> },
+  num('Assets', 'count'),
+  num('Share', 'share', formatPercent),
+  money(),
 ];
+const CATEGORY_COLUMNS = [
+  { title: 'Category', dataIndex: 'category' },
+  num('Assets', 'count'),
+  ...ASSET_STATUSES.map((s) => num(s, s)),
+  money(),
+];
+const bucketColumns = (title) => [{ title, dataIndex: 'name' }, num('Assets', 'count'), money()];
+const HAND_OVER_COLUMNS = [{ title: 'Month', dataIndex: 'label' }, ...ASSIGNMENT_ACTIONS.map((a) => num(a, a)), num('Total', 'total')];
+const DEPARTMENT_COLUMNS = [
+  { title: 'Department', dataIndex: 'department' },
+  num('Employees', 'employees'),
+  num('Holding assets', 'holders'),
+  num('Assets held', 'assets'),
+  money(),
+];
+
+const WARRANTY_ICONS = {
+  Active: <CheckCircleOutlined />,
+  'Expiring soon': <ClockCircleOutlined />,
+  Expired: <CloseCircleOutlined />,
+  'Not Applicable': <MinusCircleOutlined />,
+};
+const EMPLOYEE_STATUS_STYLE = {
+  Active: { color: STATUS_TONES.good, icon: <CheckCircleOutlined /> },
+  'On Notice': { color: STATUS_TONES.warning, icon: <ClockCircleOutlined /> },
+  Exited: { color: STATUS_TONES.none, icon: <MinusCircleOutlined /> },
+};
+const HAND_OVER_TAG = { Assigned: 'blue', Transferred: 'cyan', Returned: 'orange' };
+
+const person = (h) => h?.fullName || '—';
+const HAND_OVER_TEXT = {
+  Assigned: (e) => `to ${person(e.to)}`,
+  Transferred: (e) => `${person(e.from)} → ${person(e.to)}`,
+  Returned: (e) => `from ${person(e.from)}`,
+};
+const initials = (name = '') =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0].toUpperCase())
+    .join('') || '?';
+const daysFromToday = (date) => toDayjs(date).diff(dayjs().startOf('day'), 'day');
+const plural = (n, word) => `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`;
+const hasAny = (rows, key = 'count') => rows.some((r) => r[key] > 0);
+
+function SectionTitle({ title, note }) {
+  return (
+    <div className="dash-section">
+      <h2>{title}</h2>
+      {note && <span>{note}</span>}
+    </div>
+  );
+}
 
 export default function DashboardView() {
   const dispatch = useDispatch();
   const { data, filters, loading, error } = useSelector((s) => s.dashboard);
+  const [spendMetric, setSpendMetric] = useState('spend');
+  const [categoryMetric, setCategoryMetric] = useState('count');
+
+  useEffect(preloadCharts, []);
 
   // Every filter change re-posts { filter } to /api/dashboard; the previous request is aborted.
   const body = useMemo(() => ({ filter: toFilterPayload(filters, DASHBOARD_FILTER_KEYS) }), [filters]);
   const refetch = useAbortableFetch(fetchDashboard, body);
+  // Refresh counts as a new load (so it shows the splash); background updates don't.
+  const [refreshes, setRefreshes] = useState(0);
+  const refresh = useCallback(() => {
+    setRefreshes((n) => n + 1);
+    refetch();
+  }, [refetch]);
+  useRefreshOnFocus(refetch);
+  const { options: categoryOptions, loading: categoriesLoading } = useCategories();
 
   const setFilter = useCallback((patch) => dispatch(setDashboardFilters(patch)), [dispatch]);
   const toggleFilter = useCallback(
@@ -158,26 +172,10 @@ export default function DashboardView() {
     [setFilter, filters]
   );
   const clearFilters = useCallback(() => dispatch(resetDashboardFilters()), [dispatch]);
+  const filtered = Object.keys(body.filter).length > 0;
+  const dateFiltered = Boolean(filters.purchasedFrom || filters.purchasedTo);
 
-  const commitSearch = useCallback((value) => setFilter({ searchText: value }), [setFilter]);
-  const { searchText, setSearchText, submitSearch } = useDebouncedSearch(filters.searchText, commitSearch);
-
-  const activeFilterCount = Object.keys(body.filter).length;
-
-  const handleRange = useCallback(
-    (range) =>
-      setFilter({
-        purchasedFrom: range?.[0] ? range[0].format('YYYY-MM-DD') : null,
-        purchasedTo: range?.[1] ? range[1].format('YYYY-MM-DD') : null,
-      }),
-    [setFilter]
-  );
-  const rangeValue = useMemo(
-    () => [toDayjs(filters.purchasedFrom), toDayjs(filters.purchasedTo)],
-    [filters.purchasedFrom, filters.purchasedTo]
-  );
-
-  // Open the Assets list with the dashboard's matching filters applied (also server-side there).
+  // Drill-downs: the Assets list / Assignments page with the matching filters applied.
   const openInAssets = useCallback(
     (extra = {}) => {
       dispatch(
@@ -188,6 +186,7 @@ export default function DashboardView() {
           status: filters.status,
           condition: filters.condition,
           warrantyStatus: filters.warrantyStatus,
+          assignedTo: null,
           returnDue: null,
           ...extra,
         })
@@ -196,260 +195,393 @@ export default function DashboardView() {
     },
     [dispatch, filters]
   );
+  const openAssignments = useCallback(
+    (patch) => {
+      dispatch(
+        setCurrentQuery({
+          page: 1,
+          searchText: filters.searchText || '',
+          categoryId: filters.categoryId,
+          assignedTo: null,
+          acknowledgement: null,
+          returnDue: null,
+          ...patch,
+        })
+      );
+      navigate('/assignments');
+    },
+    [dispatch, filters.searchText, filters.categoryId]
+  );
+  const showExpiring = useCallback(() => {
+    document.getElementById('dash-expiring')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
 
-  // Derived chart rows — recomputed only when the response or the matching filter changes.
-  const categoryItems = useMemo(
-    () =>
-      (data?.byCategory || []).map((c) => ({
-        key: c.categoryId ?? 'uncategorized',
-        categoryId: c.categoryId,
-        label: c.category,
-        count: c.count,
-        active: Boolean(c.categoryId) && filters.categoryId === c.categoryId,
-        tooltip: `${c.count} assets · ${formatCompactCurrency(c.value)}`,
-      })),
-    [data?.byCategory, filters.categoryId]
-  );
-  const statusItems = useMemo(
-    () =>
-      (data?.byStatus || []).map((s) => ({
-        key: s.status,
-        label: <StatusTag value={s.status} />,
-        count: s.count,
-        active: filters.status === s.status,
-        tooltip: `${s.count} assets · ${formatCompactCurrency(s.value)}`,
-      })),
-    [data?.byStatus, filters.status]
-  );
-  const warrantyItems = useMemo(
-    () =>
-      (data?.byWarranty || []).map((w) => ({
-        key: w.warrantyStatus,
-        label: <StatusTag value={w.warrantyStatus} />,
-        count: w.count,
-        active: filters.warrantyStatus === w.warrantyStatus,
-      })),
-    [data?.byWarranty, filters.warrantyStatus]
-  );
-  const conditionItems = useMemo(
-    () =>
-      (data?.byCondition || []).map((c) => ({
-        key: c.condition,
-        label: <StatusTag value={c.condition} />,
-        count: c.count,
-        active: filters.condition === c.condition,
-      })),
-    [data?.byCondition, filters.condition]
-  );
-  const locationItems = useMemo(
-    () =>
-      (data?.byLocation || []).map((l) => ({
-        key: l.location,
-        label: l.location,
-        count: l.count,
-        active: filters.location === l.location,
-      })),
-    [data?.byLocation, filters.location]
-  );
-  const peopleStatusItems = useMemo(
-    () => (data?.people.byStatus || []).map((s) => ({ key: s.status, label: <StatusTag value={s.status} />, count: s.count })),
-    [data?.people.byStatus]
-  );
-  const workTypeItems = useMemo(
-    () => (data?.people.byWorkType || []).map((w) => ({ key: w.workType, label: w.workType, count: w.count })),
-    [data?.people.byWorkType]
-  );
-  const departmentItems = useMemo(
-    () => (data?.people.byDepartment || []).map((d) => ({ key: d.department, label: d.department, count: d.count })),
-    [data?.people.byDepartment]
-  );
-  const locationOptions = useMemo(() => toOptions(data?.filterOptions.locations || []), [data?.filterOptions.locations]);
-  const { options: categoryOptions, loading: categoriesLoading } = useCategories();
-
-  const onCategory = useCallback(
-    (item) => item.categoryId && toggleFilter('categoryId', item.categoryId),
-    [toggleFilter]
-  );
-  const onStatus = useCallback((item) => toggleFilter('status', item.key), [toggleFilter]);
-  const onWarranty = useCallback((item) => toggleFilter('warrantyStatus', item.key), [toggleFilter]);
-  const onCondition = useCallback((item) => toggleFilter('condition', item.key), [toggleFilter]);
-  const onLocation = useCallback(
-    (item) => item.key !== 'Unspecified' && toggleFilter('location', item.key),
-    [toggleFilter]
+  const onStatus = useCallback((d) => toggleFilter('status', d.key), [toggleFilter]);
+  const onCategory = useCallback((row) => row.categoryId && toggleFilter('categoryId', row.categoryId), [toggleFilter]);
+  const onCondition = useCallback((row) => toggleFilter('condition', row.key), [toggleFilter]);
+  const onLocation = useCallback((row) => row.key && !row.isOther && toggleFilter('location', row.key), [toggleFilter]);
+  const onWarranty = useCallback(
+    (part) => (part.key === 'Expiring soon' ? showExpiring() : toggleFilter('warrantyStatus', part.key)),
+    [toggleFilter, showExpiring]
   );
 
   const kpis = data?.kpis;
+  const charts = data?.charts;
+
+  const statusData = useMemo(
+    () => (charts?.status || []).map((s) => ({ ...s, color: ASSET_STATUS_COLORS[s.key] })),
+    [charts?.status]
+  );
+  // Only statuses that occur get a legend entry; colours stay fixed per status.
+  const categorySeries = useMemo(
+    () =>
+      ASSET_STATUSES.filter((s) => (charts?.categories || []).some((c) => c[s] > 0)).map((s) => ({
+        key: s,
+        name: s,
+        color: ASSET_STATUS_COLORS[s],
+      })),
+    [charts?.categories]
+  );
+  const warrantyParts = useMemo(
+    () => (charts?.warranty || []).map((w) => ({ ...w, color: WARRANTY_COLORS[w.key], icon: WARRANTY_ICONS[w.key] })),
+    [charts?.warranty]
+  );
+  const locationRows = useMemo(() => (charts?.locations || []).filter((l) => l.count > 0), [charts?.locations]);
+  const departmentRows = useMemo(
+    () => (charts?.departments || []).filter((d) => d.employees > 0 || d.assets > 0),
+    [charts?.departments]
+  );
+  const employeeParts = useMemo(
+    () => (data?.people.byStatus || []).map((s) => ({ ...s, ...EMPLOYEE_STATUS_STYLE[s.key] })),
+    [data?.people.byStatus]
+  );
+
+  const attention = useMemo(() => {
+    if (!kpis) return [];
+    return [
+      { key: 'overdue', label: 'Overdue returns', count: kpis.overdueReturns, tone: 'critical', icon: <ExclamationCircleOutlined />, onClick: () => openAssignments({ returnDue: 'Overdue' }) },
+      { key: 'dueSoon', label: `Due back in ${data.dueSoonDays} days`, count: kpis.dueSoon, tone: 'warning', icon: <ClockCircleOutlined />, onClick: () => openAssignments({ returnDue: 'Due in 7 days' }) },
+      { key: 'ack', label: 'Awaiting acknowledgement', count: kpis.pendingAcknowledgements, tone: 'warning', icon: <MailOutlined />, onClick: () => openAssignments({ acknowledgement: 'Pending' }) },
+      { key: 'warranty', label: `Warranty ends in ${data.expiringDays} days`, count: kpis.expiringSoon, tone: 'warning', icon: <SafetyCertificateOutlined />, onClick: showExpiring },
+      { key: 'repair', label: 'Under repair', count: kpis.underRepair, tone: 'serious', icon: <ToolOutlined />, onClick: () => openInAssets({ status: 'Under Repair' }) },
+      { key: 'lost', label: 'Lost', count: kpis.lost, tone: 'critical', icon: <WarningOutlined />, onClick: () => openInAssets({ status: 'Lost' }) },
+    ];
+  }, [kpis, data?.dueSoonDays, data?.expiringDays, openAssignments, openInAssets, showExpiring]);
+
+  const lists = useMemo(() => {
+    if (!data) return null;
+    const { expiringSoon, overdueReturns, recentAssets, recentHandOvers } = data.lists;
+    return {
+      expiring: expiringSoon.map((a) => {
+        const days = daysFromToday(a.warrantyUntil);
+        return {
+          key: a._id,
+          title: a.itemName,
+          meta: `${a.assetId} · ${a.category || 'Uncategorized'}`,
+          aside: days === 0 ? 'Today' : `In ${plural(days, 'day')}`,
+          asideMeta: formatDate(a.warrantyUntil),
+        };
+      }),
+      overdue: overdueReturns.map((a) => ({
+        key: a._id,
+        title: a.itemName,
+        meta: `${a.assetId} · with ${person(a.assignedTo)}`,
+        aside: <span className="overdue-text">{plural(-daysFromToday(a.expectedReturnAt), 'day')} late</span>,
+        asideMeta: `Due ${formatDate(a.expectedReturnAt)}`,
+        onClick: () => openAssignments({ returnDue: 'Overdue' }),
+      })),
+      handOvers: recentHandOvers.map((r) => ({
+        key: String(r.event._id),
+        lead: <Tag color={HAND_OVER_TAG[r.event.action]}>{r.event.action}</Tag>,
+        title: r.itemName,
+        meta: `${r.assetId} · ${HAND_OVER_TEXT[r.event.action]?.(r.event) || ''}`,
+        aside: formatDate(r.event.date),
+        asideMeta: r.event.by?.name ? `by ${r.event.by.name}` : null,
+      })),
+      recent: recentAssets.map((a) => ({
+        key: a._id,
+        title: a.itemName,
+        meta: `${a.assetId} · ${a.category || 'Uncategorized'}`,
+        aside: <CompactCurrency value={a.cost} />,
+        asideMeta: `Added ${formatDate(a.createdAt)}`,
+      })),
+      holders: data.people.topHolders.map((h) => ({
+        key: String(h._id),
+        lead: <Avatar size={32} className="dash-avatar">{initials(h.fullName)}</Avatar>,
+        title: h.fullName || 'Unknown employee',
+        meta: [h.employeeId, h.department].filter(Boolean).join(' · '),
+        aside: plural(h.assets, 'asset'),
+        asideMeta: <CompactCurrency value={h.value} />,
+        onClick: () => openInAssets({ assignedTo: String(h._id), status: null }),
+      })),
+    };
+  }, [data, openAssignments, openInAssets]);
 
   let content;
   if (!data && error) {
     content = (
-      <Card style={{ marginTop: 16 }}>
+      <Card>
         <ErrorState variant="page" title="Couldn't load the dashboard" message={error} onRetry={refetch} retrying={loading} />
       </Card>
     );
   } else if (!data) {
-    content = (
-      <>
-        <div className="kpi-grid">
-          {Array.from({ length: 6 }, (_, i) => (
-            <Card key={i} size="small">
-              <Skeleton active avatar paragraph={{ rows: 1 }} title={false} />
-            </Card>
-          ))}
-        </div>
-        <Card>
-          <Skeleton active paragraph={{ rows: 8 }} />
-        </Card>
-      </>
-    );
+    content = null; // first load: DataLoader shows the splash
   } else {
-    content = (
-      // Keep the last result on screen (dimmed) while a new filter result loads.
-      <Spin spinning={loading} tip="Updating…" size="large">
-        {error && <div style={{ marginTop: 16 }}><ErrorState message={`Couldn't refresh: ${error}`} onRetry={refetch} retrying={loading} /></div>}
+    const windowLabel = `${charts.monthly[0].label} – ${charts.monthly.at(-1).label}`;
+    const undated = charts.age.find((a) => a.key === 'unknown')?.count || 0;
+    const spendFormat = spendMetric === 'spend' ? formatCompactCurrency : formatCount;
 
-        <div className="kpi-grid">
-          <Kpi icon={<AppstoreOutlined />} label="Total assets" value={kpis.totalAssets} hint={activeFilterCount ? 'Matching filters' : 'All assets'} />
-          <Kpi icon={<WalletOutlined />} label="Total value" value={formatCompactCurrency(kpis.totalValue)} title={formatCurrency(kpis.totalValue).replace(/\.00$/, '')} hint="Purchase cost" />
-          <Kpi
-            icon={<SwapOutlined />}
-            label="Assigned"
-            value={kpis.assigned}
-            hint={
-              kpis.overdueReturns || kpis.pendingAcknowledgements ? (
-                <NavLink href="/assignments" className="overdue-text">
-                  {[
-                    kpis.overdueReturns ? `${kpis.overdueReturns} overdue` : null,
-                    kpis.pendingAcknowledgements ? `${kpis.pendingAcknowledgements} awaiting acknowledgement` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </NavLink>
-              ) : (
-                pct(kpis.assigned, kpis.totalAssets)
+    content = (
+      // Keep the last result on screen (dimmed) while a new filter result loads — no layout jump.
+      <div className={`dash-body${loading ? ' is-refreshing' : ''}`} aria-busy={loading}>
+        {error && (
+          <div className="dash-row">
+            <div className="c-lg-12">
+              <ErrorState message={`Couldn't refresh: ${error}`} onRetry={refetch} retrying={loading} />
+            </div>
+          </div>
+        )}
+
+        <div className="dash-row">
+          <div className="c-lg-5 c-md-12">
+            <HeroCard kpis={kpis} filtered={filtered} windowLabel={windowLabel} dateFiltered={dateFiltered} />
+          </div>
+          <div className="c-lg-4 c-md-6">
+            <UsageCard
+              kpis={kpis}
+              onReadyToAssign={() => openInAssets({ status: 'Available' })}
+              onPendingAcks={() => openAssignments({ acknowledgement: 'Pending' })}
+            />
+          </div>
+          <div className="c-lg-3 c-md-6">
+            <AttentionCard items={attention} />
+          </div>
+        </div>
+
+        <SectionTitle title="Assets" note={filtered ? 'Matching the filters above' : 'All assets'} />
+        <div className="dash-row">
+          <ChartCard
+            className="c-lg-8 c-md-12"
+            title={spendMetric === 'spend' ? 'Spend per month' : 'Assets bought per month'}
+            subtitle={`By purchase date · ${windowLabel}`}
+            controls={<Segmented size="small" value={spendMetric} options={SPEND_METRICS} onChange={setSpendMetric} />}
+            empty={!hasAny(charts.monthly, 'assets')}
+            emptyText="No purchases dated in this period"
+            table={{ columns: MONTHLY_COLUMNS, dataSource: charts.monthly, rowKey: 'month' }}
+            footer={undated ? `${plural(undated, 'asset')} without a purchase date ${undated === 1 ? 'is' : 'are'} not in this chart.` : null}
+          >
+            <ColumnChart
+              data={charts.monthly}
+              series={SPEND_SERIES[spendMetric]}
+              valueFormat={spendFormat}
+              tickFormat={spendMetric === 'spend' ? formatCompactCurrency : formatCompactCount}
+              labelPeak
+              height={300}
+              tooltipFooter={(d) =>
+                spendMetric === 'spend' ? `${plural(d.assets, 'asset')} · ${plural(d.units, 'unit')}` : `${formatCompactCurrency(d.spend)} spent`
+              }
+            />
+          </ChartCard>
+          <ChartCard
+            className="c-lg-4 c-md-12"
+            title="Asset status"
+            subtitle="Click a status to filter"
+            empty={!kpis.totalAssets}
+            table={{ columns: STATUS_COLUMNS, dataSource: charts.status, rowKey: 'key' }}
+          >
+            <DonutChart data={statusData} total={kpis.totalAssets} totalLabel={kpis.totalAssets === 1 ? 'asset' : 'assets'} onSelect={onStatus} activeKey={filters.status} />
+          </ChartCard>
+        </div>
+
+        <div className="dash-row">
+          <ChartCard
+            className="c-lg-7 c-md-12"
+            title="Assets by category"
+            subtitle={categoryMetric === 'count' ? 'Count by status · click a category to filter' : 'Purchase value · click a category to filter'}
+            controls={<Segmented size="small" value={categoryMetric} options={CATEGORY_METRICS} onChange={setCategoryMetric} />}
+            empty={!charts.categories.length}
+            table={{ columns: CATEGORY_COLUMNS, dataSource: charts.categories, rowKey: (r) => r.categoryId || r.category }}
+          >
+            {categoryMetric === 'count' ? (
+              <HBarChart
+                data={charts.categories}
+                categoryKey="category"
+                series={categorySeries}
+                stacked
+                totalFor={(r) => r.count}
+                tooltipFooter={(d) => `${plural(d.count, 'asset')} · ${formatCompactCurrency(d.value)}`}
+                onSelect={onCategory}
+              />
+            ) : (
+              <HBarChart
+                data={charts.categories}
+                categoryKey="category"
+                series={VALUE_SERIES}
+                valueFormat={formatCompactCurrency}
+                tooltipFooter={(d) => plural(d.count, 'asset')}
+                onSelect={onCategory}
+              />
+            )}
+          </ChartCard>
+          <div className="c-lg-5 c-md-12 dash-stack">
+            <ChartCard title="Warranty coverage" subtitle={`“Expiring soon” = ends within ${data.expiringDays} days`} empty={!kpis.totalAssets}>
+              <ShareBar parts={warrantyParts} total={kpis.totalAssets} onSelect={onWarranty} activeKey={filters.warrantyStatus} />
+            </ChartCard>
+            <ChartCard
+              title="Condition"
+              subtitle="Click a condition to filter"
+              empty={!hasAny(charts.condition)}
+              table={{ columns: bucketColumns('Condition'), dataSource: charts.condition, rowKey: 'key' }}
+            >
+              <HBarChart
+                data={charts.condition}
+                series={COUNT_SERIES}
+                colorFor={(d) => CONDITION_COLORS[d.key]}
+                categoryWidth={80}
+                rowHeight={30}
+                onSelect={onCondition}
+              />
+            </ChartCard>
+          </div>
+        </div>
+
+        <div className="dash-row">
+          <ChartCard
+            className="c-lg-4 c-md-6"
+            title="Asset age"
+            subtitle="Time since purchase"
+            empty={!kpis.totalAssets}
+            table={{ columns: bucketColumns('Age'), dataSource: charts.age, rowKey: 'key' }}
+          >
+            <ColumnChart
+              data={charts.age}
+              xKey="name"
+              series={COUNT_SERIES}
+              colorFor={(d) => AGE_COLORS[d.key]}
+              height={220}
+              tooltipFooter={(d) => formatCompactCurrency(d.value)}
+            />
+          </ChartCard>
+          <ChartCard
+            className="c-lg-4 c-md-6"
+            title="Top locations"
+            subtitle="Click a location to filter"
+            empty={!locationRows.length}
+            emptyText="No locations recorded"
+            table={{ columns: bucketColumns('Location'), dataSource: locationRows, rowKey: 'name' }}
+          >
+            <HBarChart data={locationRows} series={COUNT_SERIES} categoryWidth={110} tooltipFooter={(d) => formatCompactCurrency(d.value)} onSelect={onLocation} />
+          </ChartCard>
+          <ChartCard
+            className="c-lg-4 c-md-12"
+            id="dash-expiring"
+            title="Warranty ending soon"
+            subtitle={`Next ${data.expiringDays} days · soonest first`}
+            footer={
+              kpis.expiringSoon > lists.expiring.length ? `Showing ${lists.expiring.length} of ${formatCount(kpis.expiringSoon)}` : null
+            }
+          >
+            <DashList items={lists.expiring} emptyText={`No warranties end in the next ${data.expiringDays} days`} />
+          </ChartCard>
+        </div>
+
+        <SectionTitle title="Assignments" note="Hand-overs of the matching assets" />
+        <div className="dash-row">
+          <ChartCard
+            className="c-lg-8 c-md-12"
+            title="Hand-overs per month"
+            subtitle={`By hand-over date · ${windowLabel}`}
+            empty={!hasAny(charts.handOvers, 'total')}
+            emptyText="No hand-overs in this period"
+            table={{ columns: HAND_OVER_COLUMNS, dataSource: charts.handOvers, rowKey: 'month' }}
+          >
+            <ColumnChart data={charts.handOvers} series={HAND_OVER_SERIES} stacked height={260} tooltipFooter={(d) => `${plural(d.total, 'hand-over')}`} />
+          </ChartCard>
+          <ChartCard
+            className="c-lg-4 c-md-12"
+            title="Overdue returns"
+            subtitle="Most overdue first"
+            controls={
+              kpis.overdueReturns > 0 && (
+                <Button type="link" size="small" onClick={() => openAssignments({ returnDue: 'Overdue' })}>
+                  View all {formatCount(kpis.overdueReturns)}
+                </Button>
               )
             }
-          />
-          <Kpi icon={<CheckCircleOutlined />} label="Available" value={kpis.available} hint={pct(kpis.available, kpis.totalAssets)} />
-          <Kpi icon={<ToolOutlined />} label="Under repair" value={kpis.underRepair} hint={`${kpis.retiredOrLost} retired or lost`} />
-          <Kpi icon={<ClockCircleOutlined />} label="Warranty expiring" value={kpis.expiringSoon} hint={`In the next ${data.expiringDays} days`} />
-        </div>
-
-        <div className="dash-grid">
-          <Card className="span-7" title="Assets by category" extra={<span className="muted">Click a category to filter</span>}>
-            <BarList items={categoryItems} hideZero={!filters.categoryId}emptyText="No assets match these filters" onSelect={onCategory} />
-          </Card>
-          <div className="span-5" style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
-            <Card title="Asset status">
-              <BarList items={statusItems} onSelect={onStatus} />
-            </Card>
-            <Card title="Warranty">
-              <BarList items={warrantyItems} onSelect={onWarranty} />
-            </Card>
-          </div>
-        </div>
-
-        <div className="dash-grid">
-          <Card className="span-8" title="Purchases per month" extra={<span className="muted">Last 12 months</span>}>
-            <MonthlyChart data={data.monthly} />
-          </Card>
-          <div className="span-4" style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
-            <Card title="Condition">
-              <BarList items={conditionItems} onSelect={onCondition} />
-            </Card>
-            <Card title="Top locations">
-              <BarList items={locationItems} emptyText="No locations recorded" onSelect={onLocation} />
-            </Card>
-          </div>
-        </div>
-
-        <div className="dash-grid">
-          <Card
-            className="span-6"
-            title={`Warranty expiring in ${data.expiringDays} days`}
-            extra={<Button type="link" size="small" onClick={() => openInAssets({ warrantyStatus: 'Active' })}>View assets</Button>}
           >
-            <Table
-              className="mini-table"
-              size="small"
-              rowKey="_id"
-              pagination={false}
-              dataSource={data.expiringSoon}
-              locale={{ emptyText: smallEmpty('Nothing expiring soon') }}
-              scroll={{ x: 420 }}
-              columns={EXPIRING_COLUMNS}
-            />
-          </Card>
-          <Card
-            className="span-6"
+            <DashList items={lists.overdue} emptyText="Nothing is overdue" />
+          </ChartCard>
+        </div>
+
+        <div className="dash-row">
+          <ChartCard
+            className="c-lg-7 c-md-12"
+            title="Latest hand-overs"
+            subtitle="Assignments, transfers and returns"
+            controls={<NavLink href="/assignments">Open assignments</NavLink>}
+          >
+            <DashList items={lists.handOvers} emptyText="No hand-overs yet" />
+          </ChartCard>
+          <ChartCard
+            className="c-lg-5 c-md-12"
             title="Recently added"
-            extra={<Button type="link" size="small" onClick={() => openInAssets()}>View all</Button>}
+            subtitle="Newest assets first"
+            controls={
+              <Button type="link" size="small" onClick={() => openInAssets()}>
+                View assets
+              </Button>
+            }
           >
-            <Table
-              className="mini-table"
-              size="small"
-              rowKey="_id"
-              pagination={false}
-              dataSource={data.recentAssets}
-              locale={{ emptyText: smallEmpty('No assets yet') }}
-              scroll={{ x: 420 }}
-              columns={RECENT_COLUMNS}
-            />
-          </Card>
+            <DashList items={lists.recent} emptyText="No assets yet" />
+          </ChartCard>
         </div>
 
-        <div className="dash-grid">
-          <Card
-            className="span-7"
-            title="Assignment activity"
-            extra={<span className="muted">Latest hand-overs</span>}
+        <SectionTitle title="People" note="Employee counts cover everyone; asset numbers follow the filters" />
+        <div className="dash-row">
+          <ChartCard className="c-lg-4 c-md-6" title="Employees" subtitle="By status" controls={<NavLink href="/people">Manage</NavLink>} empty={!data.people.total} emptyText="No employees yet">
+            <div className="people-total">
+              <span className="people-total-value">{formatCount(data.people.total)}</span>
+              <span className="people-total-label">employees</span>
+            </div>
+            <ShareBar parts={employeeParts} total={data.people.total} />
+            <dl className="people-stats">
+              {data.people.byEmploymentType.map((t) => (
+                <div key={t.key}>
+                  <dt>{t.name}</dt>
+                  <dd>{formatCount(t.count)}</dd>
+                </div>
+              ))}
+              <div>
+                <dt>Holding assets</dt>
+                <dd>{formatCount(data.people.holders)}</dd>
+              </div>
+              <div>
+                <dt>Assets per holder</dt>
+                <dd>{data.people.holders ? (Math.round(data.people.assetsPerHolder * 10) / 10).toString() : '—'}</dd>
+              </div>
+            </dl>
+          </ChartCard>
+          <ChartCard
+            className="c-lg-5 c-md-6"
+            title="Departments"
+            subtitle="Employees and the assets they hold"
+            empty={!departmentRows.length}
+            emptyText="No employees yet"
+            table={{ columns: DEPARTMENT_COLUMNS, dataSource: departmentRows, rowKey: 'department' }}
           >
-            <Table
-              className="mini-table"
-              size="small"
-              rowKey={(r) => r.event._id}
-              pagination={false}
-              dataSource={data.recentAssignments}
-              locale={{ emptyText: smallEmpty('No assignments yet') }}
-              scroll={{ x: 520 }}
-              columns={ASSIGNMENT_COLUMNS}
+            <HBarChart
+              data={departmentRows}
+              categoryKey="department"
+              series={DEPARTMENT_SERIES}
+              categoryWidth={118}
+              tooltipFooter={(d) => `${plural(d.holders, 'employee')} holding · ${formatCompactCurrency(d.value)}`}
             />
-          </Card>
-          <Card
-            className="span-5"
-            title={`Overdue returns${kpis.overdueReturns ? ` (${kpis.overdueReturns})` : ''}`}
-            extra={<Button type="link" size="small" onClick={() => openInAssets({ returnDue: 'Overdue' })}>View all</Button>}
-          >
-            <Table
-              className="mini-table"
-              size="small"
-              rowKey="_id"
-              pagination={false}
-              dataSource={data.overdueReturns}
-              locale={{ emptyText: smallEmpty('Nothing overdue') }}
-              scroll={{ x: 380 }}
-              columns={OVERDUE_COLUMNS}
-            />
-          </Card>
+          </ChartCard>
+          <ChartCard className="c-lg-3 c-md-12" title="Top holders" subtitle="Most assets right now">
+            <DashList items={lists.holders} emptyText="Nobody holds an asset right now" />
+          </ChartCard>
         </div>
-
-        <div className="section-title">
-          <TeamOutlined /> People overview <span className="muted">· all employees</span>
-        </div>
-        <div className="dash-grid">
-          <Card className="span-4" title="Employees" extra={<NavLink href="/people">Manage</NavLink>}>
-            <div className="kpi-value" style={{ fontSize: 34 }}>{data.people.total}</div>
-            <div className="kpi-label" style={{ marginBottom: 12 }}>Total employees</div>
-            <BarList items={peopleStatusItems} emptyText="No employees yet" />
-          </Card>
-          <Card className="span-4" title="Work type">
-            <BarList items={workTypeItems} emptyText="No employees yet" />
-          </Card>
-          <Card className="span-4" title="Top departments">
-            <BarList items={departmentItems} emptyText="No employees yet" />
-          </Card>
-        </div>
-      </Spin>
+      </div>
     );
   }
 
@@ -462,65 +594,28 @@ export default function DashboardView() {
             Dashboard
           </Typography.Title>
           <Typography.Text type="secondary">
-            {data ? `Updated ${formatDateTime(data.generatedAt)}` : 'Asset and people insights'}
+            {loading && data ? 'Updating…' : data ? `Updated ${formatDateTime(data.generatedAt)}` : 'Asset and people insights'}
           </Typography.Text>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={refetch} loading={loading}>
+        <Button icon={<ReloadOutlined />} onClick={refresh} loading={loading}>
           Refresh
         </Button>
       </div>
 
-      <Card size="small" styles={{ body: { padding: 16 } }}>
-        <div className="dash-filters">
-          <Input.Search
-            className="search"
-            placeholder="Search asset ID, name, brand, serial, vendor, invoice…"
-            allowClear
-            maxLength={100}
-            value={searchText}
-            loading={loading && Boolean(searchText)}
-            onChange={(e) => setSearchText(e.target.value)}
-            onSearch={submitSearch}
-          />
-          <Select placeholder="Category" allowClear showSearch optionFilterProp="label" value={filters.categoryId} options={categoryOptions} loading={categoriesLoading} onChange={(v) => setFilter({ categoryId: v ?? null })} />
-          <Select placeholder="Status" allowClear value={filters.status} options={STATUS_OPTIONS} onChange={(v) => setFilter({ status: v ?? null })} />
-          <Select placeholder="Condition" allowClear value={filters.condition} options={CONDITION_OPTIONS} onChange={(v) => setFilter({ condition: v ?? null })} />
-          <Select placeholder="Warranty" allowClear value={filters.warrantyStatus} options={WARRANTY_OPTIONS} onChange={(v) => setFilter({ warrantyStatus: v ?? null })} />
-          <Select placeholder="Purchase type" allowClear value={filters.purchaseType} options={PURCHASE_TYPE_OPTIONS} onChange={(v) => setFilter({ purchaseType: v ?? null })} />
-          <Select
-            placeholder="Location"
-            allowClear
-            showSearch
-            value={filters.location}
-            options={locationOptions}
-            loading={!data && loading}
-            onChange={(v) => setFilter({ location: v ?? null })}
-            notFoundContent="No locations yet"
-          />
-          <DatePicker.RangePicker
-            className="range"
-            format="DD MMM YYYY"
-            placeholder={['Purchased from', 'Purchased to']}
-            value={rangeValue}
-            allowEmpty={[true, true]}
-            disabledDate={disableFuture}
-            onChange={handleRange}
-            presets={RANGE_PRESETS}
-          />
-        </div>
-        <div className="dash-filter-foot">
-          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            {activeFilterCount
-              ? `${activeFilterCount} filter${activeFilterCount > 1 ? 's' : ''} applied · asset figures reflect filters`
-              : 'Showing all assets'}
-          </Typography.Text>
-          <Button type="link" icon={<ClearOutlined />} disabled={!activeFilterCount} onClick={clearFilters}>
-            Clear filters
-          </Button>
-        </div>
-      </Card>
+      <DashboardFilters
+        filters={filters}
+        setFilter={setFilter}
+        clearFilters={clearFilters}
+        loading={loading}
+        categoryOptions={categoryOptions}
+        categoriesLoading={categoriesLoading}
+        locations={data?.filterOptions.locations}
+      />
 
-      {content}
+      {/* New filters and Refresh show the splash here; a background update (back to the tab) doesn't. */}
+      <DataLoader ready={Boolean(data) || Boolean(error)} loading={loading} dataKey={`${JSON.stringify(body.filter)}#${refreshes}`} minHeight={520}>
+        {content}
+      </DataLoader>
     </>
   );
 }
