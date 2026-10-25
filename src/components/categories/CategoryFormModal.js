@@ -6,6 +6,7 @@ import { App, Form, Input, Modal } from 'antd';
 import { categoryKey } from '@/lib/constants';
 import { applyServerErrors, maxLen, requiredText, trimStart, validateOrScroll } from '@/lib/forms';
 import { createCategory, updateCategory } from '@/store/categoriesSlice';
+import ResetFormOnOpen from '@/components/ResetFormOnOpen';
 
 /**
  * Add a category, or rename `category` when given. `existing` is the loaded list, used to flag a
@@ -38,11 +39,13 @@ export default function CategoryFormModal({ open, category, existing, onClose, o
     [takenNames]
   );
 
+  // Stable per category, so the form is reset when the modal opens for a record, not on every render.
+  const initialValues = useMemo(() => ({ name: category?.name }), [category]);
+
+  // A fresh start each time it opens: no error left over from the last attempt.
   useLayoutEffect(() => {
-    if (!open) return;
-    form.resetFields();
-    setHasError(false);
-  }, [open, category, form]);
+    if (open) setHasError(false);
+  }, [open, category]);
 
   const handleSubmit = useCallback(async () => {
     if (blocked) return; // Enter in the input shouldn't bypass the disabled button
@@ -87,7 +90,8 @@ export default function CategoryFormModal({ open, category, existing, onClose, o
         form={form}
         layout="vertical"
         preserve={false}
-        initialValues={{ name: category?.name }}
+        clearOnDestroy
+        initialValues={initialValues}
         disabled={saving}
         onFieldsChange={trackErrors}
         style={{ marginTop: 16 }}
@@ -106,6 +110,8 @@ export default function CategoryFormModal({ open, category, existing, onClose, o
         >
           <Input placeholder="e.g. Laptop" maxLength={60} autoFocus onPressEnter={handleSubmit} />
         </Form.Item>
+        {/* Last child: starts every Add / Rename from this category's name, never the previous one's. */}
+        <ResetFormOnOpen form={form} open={open} values={initialValues} />
       </Form>
     </Modal>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import dayjs from 'dayjs';
 import { Alert, App, Button, Col, DatePicker, Form, Input, Modal, Radio, Row, Select, Spin, Typography } from 'antd';
@@ -8,8 +8,10 @@ import { MailOutlined } from '@ant-design/icons';
 import { ASSET_CONDITIONS, RETURN_STATUSES, isReturnOverdue } from '@/lib/constants';
 import { formatDate, toDayjs } from '@/lib/format';
 import { applyServerErrors, maxLen, validateOrScroll } from '@/lib/forms';
+import { confirmAction, CONFIRM_MESSAGES } from '@/lib/confirm';
 import AssetImage from '@/components/assets/AssetImage';
 import StatusTag from '@/components/StatusTag';
+import ResetFormOnOpen from '@/components/ResetFormOnOpen';
 import { isOutcomeUnknown } from '@/services/axios';
 import { assignAsset, assignManyAssets, returnAsset, searchAssignableAssets, transferAsset } from '@/store/assetsSlice';
 import { fetchEmployeeOptions } from '@/store/employeesSlice';
@@ -138,7 +140,8 @@ export default function AssignmentModal({ open, mode = 'assign', asset, employee
       employees.map((e) => {
         const isHolder = currentHolderId && e._id === currentHolderId;
         const note = isHolder ? ' · has it now' : e.status === 'Exited' ? ' · Exited' : e.status === 'On Notice' ? ' · On notice' : '';
-        return { value: e._id, label: `${e.fullName} (${e.employeeId})${note}`, disabled: e.status === 'Exited' || isHolder };
+        const intern = e.employmentType === 'Intern' ? ' · Intern' : '';
+        return { value: e._id, label: `${e.fullName} (${e.employeeId})${intern}${note}`, disabled: e.status === 'Exited' || isHolder };
       }),
     [employees, currentHolderId]
   );
@@ -206,7 +209,8 @@ export default function AssignmentModal({ open, mode = 'assign', asset, employee
     (d) => d.isAfter(dayjs().endOf('day')) || (minDate ? d.isBefore(minDate, 'day') : false),
     [minDate]
   );
-  const handOverDate = Form.useWatch(config.dateField, form);
+  // A selector, not a field name: the date field's name changes with the mode.
+  const handOverDate = Form.useWatch((values) => values[config.dateField], form);
   const disabledDueDate = useCallback((d) => d.isBefore(handOverDate || today(), 'day'), [handOverDate]);
 
   const initialValues = useMemo(
@@ -220,14 +224,8 @@ export default function AssignmentModal({ open, mode = 'assign', asset, employee
     [config.dateField, asset, mode]
   );
 
-  // The form instance outlives each open: reset so the previous asset's values don't carry over.
-  useLayoutEffect(() => {
-    if (open) form.resetFields();
-  }, [open, initialValues, form]);
-
-  const handleSubmit = useCallback(async () => {
-    const values = await validateOrScroll(form);
-    if (!values) return;
+  // Runs the hand-over (after the form is valid and the admin confirmed it).
+  const submit = useCallback(async (values) => {
     const ymd = (d) => (d ? d.format('YYYY-MM-DD') : null);
     const employeeId = employee?._id ?? values.employeeId;
 
@@ -323,6 +321,20 @@ export default function AssignmentModal({ open, mode = 'assign', asset, employee
     }
   }, [form, config, mode, multi, employee, asset, dispatch, message, modal, onDone]);
 
+  // Validate first, so the confirmation only appears for a hand-over that can go ahead.
+  const handleSubmit = useCallback(async () => {
+    const values = await validateOrScroll(form);
+    if (!values) return;
+    const kind = multi ? (values.assetIds.length > 1 ? 'assignMany' : 'assign') : mode;
+    confirmAction(modal, {
+      title: CONFIRM_MESSAGES[kind] || CONFIRM_MESSAGES.assign,
+      // Not returned: the confirmation closes at once and this dialog's button shows the progress.
+      onYes: () => {
+        submit(values);
+      },
+    });
+  }, [form, multi, mode, modal, submit]);
+
   const employeeHelp = optionsError ? (
     <span>
       Couldn&apos;t load employees.{' '}
@@ -351,7 +363,15 @@ export default function AssignmentModal({ open, mode = 'assign', asset, employee
     >
       <Summary asset={asset} employee={employee} />
 
-      <Form form={form} layout="vertical" preserve={false} disabled={saving} initialValues={initialValues} style={{ marginTop: asset || employee ? 0 : 16 }}>
+      <Form
+        form={form}
+        layout="vertical"
+        preserve={false}
+        clearOnDestroy
+        disabled={saving}
+        initialValues={initialValues}
+        style={{ marginTop: asset || employee ? 0 : 16 }}
+      >
         {pickEmployee && (
           <Form.Item
             label={mode === 'transfer' ? 'Transfer to' : 'Assign to'}
@@ -470,6 +490,8 @@ export default function AssignmentModal({ open, mode = 'assign', asset, employee
             placeholder={mode === 'return' ? 'e.g. Screen has a scratch' : 'e.g. Handed over with charger and bag'}
           />
         </Form.Item>
+        {/* Last child: starts every hand-over from this asset's values, never the previous one's. */}
+        <ResetFormOnOpen form={form} open={open} values={initialValues} />
       </Form>
 
       {multi && !assetSearch.loading && !assetSearch.error && assetSearch.items.length === 0 && (

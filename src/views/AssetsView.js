@@ -24,15 +24,19 @@ import {
   isSingleUnit,
 } from '@/lib/constants';
 import { formatDate } from '@/lib/format';
+import { confirmAction, CONFIRM_MESSAGES } from '@/lib/confirm';
 import CompactCurrency from '@/components/CompactCurrency';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
+import DataLoader from '@/components/DataLoader';
+import MoreFilters, { FilterChips } from '@/components/MoreFilters';
 import AssetImage from '@/components/assets/AssetImage';
 import AssetFormModal from '@/components/assets/AssetFormModal';
 import AssetDetailsDrawer from '@/components/assets/AssetDetailsDrawer';
 import AssetBillViewer from '@/components/assets/AssetBillViewer';
 import AssignmentModal from '@/components/assets/AssignmentModal';
 import useServerTable, { PAGE_SIZE_OPTIONS } from '@/hooks/useServerTable';
+import useRefreshOnFocus from '@/hooks/useRefreshOnFocus';
 import useCategories from '@/hooks/useCategories';
 import { fetchAssets, deleteAsset, setAssetQuery, resetAssetFilters, ASSET_FILTER_KEYS } from '@/store/assetsSlice';
 import { fetchEmployeeOptions } from '@/store/employeesSlice';
@@ -76,6 +80,18 @@ export default function AssetsView() {
     [employees]
   );
 
+  // Search, Category and Status stay on the page; the rest sit behind "More filters" (applied with
+  // its Apply button) and show as chips while they're set.
+  const moreFields = useMemo(
+    () => [
+      { key: 'condition', label: 'Condition', options: CONDITION_OPTIONS },
+      { key: 'warrantyStatus', label: 'Warranty', options: WARRANTY_OPTIONS },
+      { key: 'assignedTo', label: 'Assigned to', placeholder: 'Anyone', options: employeeFilterOptions, showSearch: true, loading: employeesLoading },
+      { key: 'returnDue', label: 'Return due', placeholder: 'Any return date', options: RETURN_DUE_OPTIONS },
+    ],
+    [employeeFilterOptions, employeesLoading]
+  );
+
   const {
     refetch,
     setFilter,
@@ -86,6 +102,20 @@ export default function AssetsView() {
     setSearchText,
     submitSearch,
   } = useServerTable({ query, fetchThunk: fetchAssets, setQueryAction: setAssetQuery, filterKeys: ASSET_FILTER_KEYS });
+  // Coming back to this tab reloads the list (e.g. to show acknowledgements made from the email).
+  useRefreshOnFocus(refetch);
+
+  const moreChips = useMemo(
+    () =>
+      moreFields
+        .filter((f) => query[f.key])
+        .map((f) => ({
+          key: f.key,
+          label: `${f.label}: ${f.options.find((o) => o.value === query[f.key])?.label || 'Selected'}`,
+          onClose: () => setFilter({ [f.key]: null }),
+        })),
+    [moreFields, query, setFilter]
+  );
 
   const clearFilters = useCallback(() => dispatch(resetAssetFilters()), [dispatch]);
   const openCreate = useCallback(() => setModalState({ open: true, assetId: null }), []);
@@ -113,14 +143,11 @@ export default function AssetsView() {
 
   const confirmDelete = useCallback(
     (asset) => {
-      modal.confirm({
-        title: 'Are you sure you want to delete this asset?',
-        content: `${asset.assetId} · ${asset.itemName} will be permanently deleted, along with its assignment history and activity log. This cannot be undone.`,
-        okText: 'Yes, delete',
-        okType: 'danger',
-        cancelText: 'Cancel',
-        // Returning the promise keeps the OK button spinning until the request finishes.
-        onOk: async () => {
+      confirmAction(modal, {
+        title: CONFIRM_MESSAGES.delete,
+        danger: true,
+        // Returning the promise keeps Yes spinning until the request finishes.
+        onYes: async () => {
           try {
             const result = await dispatch(deleteAsset(asset._id)).unwrap();
             message.success(result.message || 'Asset deleted');
@@ -337,40 +364,29 @@ export default function AssetsView() {
           />
           <Select placeholder="Category" allowClear showSearch optionFilterProp="label" loading={categoriesLoading} value={query.categoryId} options={categoryOptions} onChange={(v) => setFilter({ categoryId: v ?? null })} />
           <Select placeholder="Status" allowClear value={query.status} options={STATUS_OPTIONS} onChange={(v) => setFilter({ status: v ?? null })} />
-          <Select placeholder="Condition" allowClear value={query.condition} options={CONDITION_OPTIONS} onChange={(v) => setFilter({ condition: v ?? null })} />
-          <Select placeholder="Warranty" allowClear value={query.warrantyStatus} options={WARRANTY_OPTIONS} onChange={(v) => setFilter({ warrantyStatus: v ?? null })} />
-          <Select
-            placeholder="Assigned to"
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            style={{ minWidth: 220 }}
-            loading={employeesLoading}
-            value={query.assignedTo}
-            options={employeeFilterOptions}
-            onChange={(v) => setFilter({ assignedTo: v ?? null })}
-          />
-          <Select placeholder="Return due" allowClear value={query.returnDue} options={RETURN_DUE_OPTIONS} onChange={(v) => setFilter({ returnDue: v ?? null })} />
+          <MoreFilters fields={moreFields} values={query} onApply={setFilter} />
           {activeFilterCount > 0 && (
             <Button icon={<ClearOutlined />} onClick={clearFilters}>
               Clear ({activeFilterCount})
             </Button>
           )}
         </div>
+        <FilterChips chips={moreChips} />
 
         {error && <ErrorState message={error} onRetry={refetch} retrying={loading} />}
 
-        <Table
-          rowKey="_id"
-          columns={columns}
-          dataSource={items}
-          loading={{ spinning: loading, tip: 'Loading assets…' }}
-          scroll={{ x: 2010 }}
-          pagination={pagination}
-          onChange={onTableChange}
-          locale={{ emptyText }}
-          showSorterTooltip={false}
-        />
+        <DataLoader ready={loaded || Boolean(error)} loading={loading} dataKey={JSON.stringify(query)}>
+          <Table
+            rowKey="_id"
+            columns={columns}
+            dataSource={items}
+            scroll={{ x: 2010 }}
+            pagination={pagination}
+            onChange={onTableChange}
+            locale={{ emptyText }}
+            showSorterTooltip={false}
+          />
+        </DataLoader>
       </Card>
 
       <AssetFormModal open={modalState.open} assetId={modalState.assetId} onClose={closeModal} onSaved={handleSaved} />

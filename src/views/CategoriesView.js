@@ -6,6 +6,7 @@ import { Button, Card, Empty, Input, Table, Tooltip, Typography } from 'antd';
 import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { navigate } from '@/lib/navigation';
 import ErrorState from '@/components/ErrorState';
+import DataLoader from '@/components/DataLoader';
 import CategoryFormModal from '@/components/categories/CategoryFormModal';
 import useCategories from '@/hooks/useCategories';
 import { ASSET_DEFAULT_QUERY, setAssetQuery } from '@/store/assetsSlice';
@@ -127,16 +128,18 @@ export default function CategoriesView() {
 
         {error && <ErrorState message={error} onRetry={refetch} retrying={loading} />}
 
-        <Table
-          rowKey="_id"
-          columns={columns}
-          dataSource={filtered}
-          loading={{ spinning: loading, tip: 'Loading categories…' }}
-          pagination={{ pageSize: 20, hideOnSinglePage: true, showTotal: (t) => `${t} categories` }}
-          locale={{ emptyText }}
-          scroll={{ x: 380 }}
-          showSorterTooltip={false}
-        />
+        {/* The search here filters the loaded list in the browser, so only loading the list shows the splash. */}
+        <DataLoader ready={loaded || Boolean(error)} loading={loading}>
+          <Table
+            rowKey="_id"
+            columns={columns}
+            dataSource={filtered}
+            pagination={{ pageSize: 20, hideOnSinglePage: true, showTotal: (t) => `${t} categories` }}
+            locale={{ emptyText }}
+            scroll={{ x: 380 }}
+            showSorterTooltip={false}
+          />
+        </DataLoader>
       </Card>
 
       <CategoryFormModal

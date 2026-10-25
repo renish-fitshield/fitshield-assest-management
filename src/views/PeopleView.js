@@ -5,10 +5,12 @@ import { useDispatch, useSelector } from 'react-redux';
 import { App, Button, Card, Empty, Input, Select, Space, Table, Tooltip, Typography } from 'antd';
 import { ClearOutlined, DeleteOutlined, EditOutlined, LaptopOutlined, PlusOutlined } from '@ant-design/icons';
 import EmployeeAssetsDrawer from '@/components/people/EmployeeAssetsDrawer';
-import { DEPARTMENTS, WORK_TYPES, EMPLOYEE_STATUSES } from '@/lib/constants';
+import { DEPARTMENTS, WORK_TYPES, EMPLOYEE_STATUSES, EMPLOYMENT_TYPES, DEFAULT_EMPLOYMENT_TYPE } from '@/lib/constants';
 import { formatDate } from '@/lib/format';
+import { confirmAction, CONFIRM_MESSAGES } from '@/lib/confirm';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
+import DataLoader from '@/components/DataLoader';
 import EmployeeFormModal from '@/components/people/EmployeeFormModal';
 import useServerTable, { PAGE_SIZE_OPTIONS } from '@/hooks/useServerTable';
 import {
@@ -23,6 +25,7 @@ const toOptions = (list) => list.map((v) => ({ label: v, value: v }));
 const DEPARTMENT_OPTIONS = toOptions(DEPARTMENTS);
 const WORK_TYPE_OPTIONS = toOptions(WORK_TYPES);
 const STATUS_OPTIONS = toOptions(EMPLOYEE_STATUSES);
+const EMPLOYMENT_TYPE_OPTIONS = toOptions(EMPLOYMENT_TYPES);
 const CLOSED_MODAL = { open: false, employeeId: null };
 
 export default function PeopleView() {
@@ -60,13 +63,10 @@ export default function PeopleView() {
 
   const confirmDelete = useCallback(
     (employee) => {
-      modal.confirm({
-        title: 'Are you sure you want to delete this employee?',
-        content: `${employee.employeeId} · ${employee.fullName} will be permanently deleted. Assets purchased by them will no longer show a purchaser.`,
-        okText: 'Yes, delete',
-        okType: 'danger',
-        cancelText: 'Cancel',
-        onOk: async () => {
+      confirmAction(modal, {
+        title: CONFIRM_MESSAGES.delete,
+        danger: true,
+        onYes: async () => {
           try {
             const result = await dispatch(deleteEmployee(employee._id)).unwrap();
             message.success(result.message || 'Employee deleted');
@@ -82,7 +82,24 @@ export default function PeopleView() {
 
   const columns = useMemo(
     () => [
-      { title: 'Employee ID', dataIndex: 'employeeId', key: 'employeeId', width: 130, fixed: 'left', sorter: true, sortOrder: sortOrderFor('employeeId') },
+      {
+        title: 'Employee ID',
+        dataIndex: 'employeeId',
+        key: 'employeeId',
+        width: 170,
+        fixed: 'left',
+        sorter: true,
+        sortOrder: sortOrderFor('employeeId'),
+        // FSEMP-ENG-0001 on one line; a former ID (e.g. EMP-0056) shows on hover.
+        render: (v, r) =>
+          r.previousEmployeeIds?.length ? (
+            <Tooltip title={`Previously ${r.previousEmployeeIds.join(', ')}`}>
+              <span style={{ whiteSpace: 'nowrap' }}>{v}</span>
+            </Tooltip>
+          ) : (
+            <span style={{ whiteSpace: 'nowrap' }}>{v}</span>
+          ),
+      },
       {
         title: 'Name',
         dataIndex: 'fullName',
@@ -96,6 +113,15 @@ export default function PeopleView() {
             <div className="muted">{r.workEmail}</div>
           </div>
         ),
+      },
+      {
+        title: 'Type',
+        dataIndex: 'employmentType',
+        key: 'employmentType',
+        width: 115,
+        sorter: true,
+        sortOrder: sortOrderFor('employmentType'),
+        render: (v) => <StatusTag value={v || DEFAULT_EMPLOYMENT_TYPE} />,
       },
       { title: 'Department', dataIndex: 'department', key: 'department', width: 160, sorter: true, sortOrder: sortOrderFor('department') },
       { title: 'Designation', dataIndex: 'designation', key: 'designation', width: 180, sorter: true, sortOrder: sortOrderFor('designation'), render: (v) => v || '—' },
@@ -208,6 +234,7 @@ export default function PeopleView() {
             onChange={(e) => setSearchText(e.target.value)}
             onSearch={submitSearch}
           />
+          <Select placeholder="Employment Type" allowClear value={query.employmentType} options={EMPLOYMENT_TYPE_OPTIONS} onChange={(v) => setFilter({ employmentType: v ?? null })} />
           <Select placeholder="Department" allowClear showSearch value={query.department} options={DEPARTMENT_OPTIONS} onChange={(v) => setFilter({ department: v ?? null })} />
           <Select placeholder="Work Type" allowClear value={query.workType} options={WORK_TYPE_OPTIONS} onChange={(v) => setFilter({ workType: v ?? null })} />
           <Select placeholder="Status" allowClear value={query.status} options={STATUS_OPTIONS} onChange={(v) => setFilter({ status: v ?? null })} />
@@ -220,17 +247,18 @@ export default function PeopleView() {
 
         {error && <ErrorState message={error} onRetry={refetch} retrying={loading} />}
 
-        <Table
-          rowKey="_id"
-          columns={columns}
-          dataSource={items}
-          loading={{ spinning: loading, tip: 'Loading employees…' }}
-          scroll={{ x: 1610 }}
-          pagination={pagination}
-          onChange={onTableChange}
-          locale={{ emptyText }}
-          showSorterTooltip={false}
-        />
+        <DataLoader ready={loaded || Boolean(error)} loading={loading} dataKey={JSON.stringify(query)}>
+          <Table
+            rowKey="_id"
+            columns={columns}
+            dataSource={items}
+            scroll={{ x: 1765 }}
+            pagination={pagination}
+            onChange={onTableChange}
+            locale={{ emptyText }}
+            showSorterTooltip={false}
+          />
+        </DataLoader>
       </Card>
 
       <EmployeeFormModal open={modalState.open} employeeId={modalState.employeeId} onClose={closeModal} onSaved={handleSaved} />

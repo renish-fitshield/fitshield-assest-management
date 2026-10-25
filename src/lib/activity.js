@@ -74,6 +74,6 @@ export const activity = (action, actor, { changes = [], note } = {}) => ({
   at: new Date(),
 });
 
-/** "Priya Sharma (EMP-0003)" — how a holder appears in the activity log. */
+/** "Priya Sharma (FSEMP-ENG-0003)" — how a holder appears in the activity log. */
 export const holderLabel = (holder) =>
   holder ? `${holder.fullName}${holder.employeeId ? ` (${holder.employeeId})` : ''}` : null;
