@@ -5,13 +5,23 @@ import { Button, Card, Result } from 'antd';
 import DashboardView from '@/views/DashboardView';
 import AssetsView from '@/views/AssetsView';
 import PeopleView from '@/views/PeopleView';
-import { NavLink } from '@/lib/navigation';
+import CategoriesView from '@/views/CategoriesView';
+import AssignmentsView from '@/views/AssignmentsView';
+import { APP_ROUTES, NavLink } from '@/lib/navigation';
 
 const VIEWS = {
   '/dashboard': DashboardView,
   '/assets': AssetsView,
+  '/assignments': AssignmentsView,
+  '/categories': CategoriesView,
   '/people': PeopleView,
 };
+
+// Every page here must also be in APP_ROUTES, or opening it reloads the whole app.
+if (process.env.NODE_ENV !== 'production') {
+  const missing = Object.keys(VIEWS).filter((path) => !APP_ROUTES.includes(path));
+  if (missing.length) console.error(`[navigation] add ${missing.join(', ')} to APP_ROUTES in lib/navigation.js`);
+}
 
 /**
  * Single route for every in-app page. The view is picked from the pathname, which changes

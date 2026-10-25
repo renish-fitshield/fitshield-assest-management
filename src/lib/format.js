@@ -10,6 +10,29 @@ export const formatDateTime = (value) => (value ? dayjs(value).format('DD MMM YY
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
 export const formatCurrency = (value) => (value === null || value === undefined ? '—' : inr.format(value));
 
+// Indian short form: 56,500 → ₹56.5k, 4,49,000 → ₹4.49L, 2,50,00,000 → ₹2.5Cr.
+// Truncates (not rounds) to 2 decimals so the short form never overstates the amount.
+const COMPACT_UNITS = [
+  { size: 1e7, suffix: 'Cr' },
+  { size: 1e5, suffix: 'L' },
+  { size: 1e3, suffix: 'k' },
+];
+export const formatCompactCurrency = (value) => {
+  if (value === null || value === undefined) return '—';
+  const n = Number(value);
+  const unit = COMPACT_UNITS.find((u) => Math.abs(n) >= u.size);
+  if (!unit) return formatCurrency(n).replace(/\.00$/, '');
+  const short = Math.trunc((n / unit.size) * 100) / 100;
+  return `${n < 0 ? '-' : ''}₹${Math.abs(short)}${unit.suffix}`;
+};
+
+const count = new Intl.NumberFormat('en-IN');
+const compactCount = new Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 1 });
+export const formatCount = (value) => count.format(value || 0);
+// 1,200 → 1.2K, 1,20,000 → 1.2L (axis ticks and tight spaces)
+export const formatCompactCount = (value) => compactCount.format(value || 0);
+export const formatPercent = (ratio) => `${Math.round((ratio || 0) * 100)}%`;
+
 export const STATUS_COLORS = {
   // asset status
   Available: 'green',
@@ -30,4 +53,10 @@ export const STATUS_COLORS = {
   Expired: 'red',
   'On Notice': 'orange',
   Exited: 'default',
+  // acknowledgement
+  Pending: 'gold',
+  Acknowledged: 'green',
+  // employment type
+  'Full-Time': 'blue',
+  Intern: 'purple',
 };

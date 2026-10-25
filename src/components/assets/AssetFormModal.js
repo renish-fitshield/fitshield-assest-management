@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   App,
@@ -17,7 +17,6 @@ import {
   Spin,
 } from 'antd';
 import {
-  ASSET_CATEGORIES,
   BRANDS,
   ASSET_CONDITIONS,
   PURCHASE_TYPES,
@@ -31,6 +30,7 @@ import { toDayjs } from '@/lib/format';
 import { applyServerErrors, disableFutureDates, maxLen, requiredText, trimStart, validateOrScroll } from '@/lib/forms';
 import StatusTag from '@/components/StatusTag';
 import ErrorState from '@/components/ErrorState';
+import ResetFormOnOpen from '@/components/ResetFormOnOpen';
 import AssetImageField from '@/components/assets/AssetImageField';
 import AssetBillField from '@/components/assets/AssetBillField';
 import { getErrorMessage } from '@/services/axios';
@@ -43,9 +43,9 @@ import {
   updateAsset,
   uploadAssetImage,
 } from '@/store/assetsSlice';
+import { fetchCategories } from '@/store/categoriesSlice';
 
 const toOptions = (list) => list.map((v) => ({ label: v, value: v }));
-const CATEGORY_OPTIONS = toOptions(ASSET_CATEGORIES);
 const DEFAULT_BRAND_OPTIONS = toOptions(BRANDS);
 const CONDITION_OPTIONS = toOptions(ASSET_CONDITIONS);
 // "Assigned" is only set by the Assign action; an assigned asset's status is locked until returned.
@@ -142,6 +142,23 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
     return () => promise.abort();
   }, [open, dispatch]);
 
+  // Categories are managed on the Categories page; reload them each time the form opens.
+  const categories = useSelector((s) => s.categories);
+  useEffect(() => {
+    if (!open) return undefined;
+    const promise = dispatch(fetchCategories());
+    return () => promise.abort();
+  }, [open, dispatch]);
+  const categoryOptions = useMemo(() => {
+    const options = categories.items.map((c) => ({ value: c._id, label: c.name }));
+    // Until the list loads, show the asset's current category by name rather than its raw id.
+    const current = record.asset;
+    if (current?.categoryId && !options.some((o) => o.value === current.categoryId)) {
+      options.push({ value: current.categoryId, label: current.category });
+    }
+    return options;
+  }, [categories.items, record.asset]);
+
   const initialValues = useMemo(() => toFormValues(record.asset), [record.asset]);
   const warrantyStatus = useMemo(() => getWarrantyStatus(warrantyUntil?.toDate?.()), [warrantyUntil]);
 
@@ -203,12 +220,6 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
   const waitingForRecord = isEdit && (record.loading || (!record.asset && !record.error));
   const showForm = open && !record.error && !waitingForRecord;
 
-  // The form instance outlives each open, and a remounted <Form> merges its initialValues *under* the
-  // values it still holds — so reset once it's showing, or the previously edited asset's data leaks in.
-  useLayoutEffect(() => {
-    if (showForm) form.resetFields();
-  }, [showForm, initialValues, form]);
-
   let body;
   if (record.error) {
     body = (
@@ -233,6 +244,7 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
         form={form}
         layout="vertical"
         preserve={false}
+        clearOnDestroy
         initialValues={initialValues}
         disabled={busy}
         style={{ marginTop: 16 }}
@@ -251,8 +263,22 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
         </Form.Item>
         <Row gutter={16}>
           <Col xs={24} md={8}>
-            <Form.Item label="Category" name="category" rules={[{ required: true, message: 'Category is required' }]}>
-              <Select options={CATEGORY_OPTIONS} placeholder="Select category" showSearch />
+            <Form.Item
+              label="Category"
+              name="categoryId"
+              rules={[{ required: true, message: 'Category is required' }]}
+              tooltip="Not in the list? Add it on the Categories page first"
+            >
+              <Select
+                options={categoryOptions}
+                placeholder="Select category"
+                showSearch
+                optionFilterProp="label"
+                loading={categories.loading}
+                notFoundContent={
+                  categories.error ? `Couldn't load categories: ${categories.error}` : 'No such category — add it on the Categories page'
+                }
+              />
             </Form.Item>
           </Col>
           <Col xs={24} md={12}>
@@ -459,6 +485,8 @@ export default function AssetFormModal({ open, assetId, onClose, onSaved }) {
             </Form.Item>
           </Col>
         </Row>
+        {/* Last child: starts every Add / Edit from this record's values, never the previous one's. */}
+        <ResetFormOnOpen form={form} open={showForm} values={initialValues} />
       </Form>
     );
   }

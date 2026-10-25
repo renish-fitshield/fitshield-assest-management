@@ -7,9 +7,13 @@ const PUBLIC_APIS = new Set(['/api/auth/login', '/api/auth/refresh', '/api/auth/
 
 const unauthorized = (message, code) => NextResponse.json({ message, code }, { status: 401 });
 
+// Opened by employees from their acknowledgement email (no login; the signed token in the path is the proof).
+const PUBLIC_ACK_API = '/api/acknowledgements/';
+const PUBLIC_ACK_PAGE = '/acknowledge/';
+
 async function guardApi(req) {
   const { pathname } = req.nextUrl;
-  if (PUBLIC_APIS.has(pathname)) return NextResponse.next();
+  if (PUBLIC_APIS.has(pathname) || pathname.startsWith(PUBLIC_ACK_API)) return NextResponse.next();
 
   const header = req.headers.get('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -42,6 +46,7 @@ async function hasValidSession(req) {
 
 async function guardPage(req) {
   const { pathname } = req.nextUrl;
+  if (pathname.startsWith(PUBLIC_ACK_PAGE)) return NextResponse.next();
   const loggedIn = await hasValidSession(req);
 
   if (pathname === '/login') {

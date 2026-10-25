@@ -21,9 +21,4 @@ export async function nextSequence(name) {
   return counter.seq;
 }
 
-/** Atomically generates the next human-readable ID, e.g. EMP-0001. */
-export async function nextSequenceId(name, prefix) {
-  return `${prefix}-${String(await nextSequence(name)).padStart(4, '0')}`;
-}
-
 export default Counter;
